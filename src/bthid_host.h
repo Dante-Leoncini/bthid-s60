@@ -45,10 +45,12 @@ public:
 	~CBtHidHost();
 
 	TInt DeviceCount() const;
-	// abre el cuadro de busqueda de dispositivos Bluetooth del telefono; el elegido se conecta y se guarda
-	void SelectDevice();
+	// abre el cuadro de busqueda de dispositivos Bluetooth del telefono; el elegido se conecta y se guarda.
+	// aType: que es (mouse o teclado); 0 = lo que diga la clase del dispositivo
+	void SelectDevice( TInt aType = 0 );
 	void CancelSelect();
 	void ForgetAll();
+	void Forget( TInt aType );
 	void GetStatus( TBtHidStatus &aStatus ) const;
 
 	// conexion entrante (CBtHidListener) en el canal aPsm: la adopta el dispositivo elegido con esa direccion
@@ -77,6 +79,7 @@ private:
 	CBtHidDevice                 *iDev[EMaxDevices];
 	CBtHidListener               *iListenCtrl, *iListenIntr;
 	TFileName                     iFile;
+	TInt                          iSelectType;
 };
 
 #endif // BTHID_HOST_H

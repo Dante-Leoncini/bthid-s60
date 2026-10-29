@@ -122,7 +122,17 @@ EXPORT_C TInt RBtHidManager::Connect()
 
 EXPORT_C void RBtHidManager::Search( TRequestStatus &aStatus )
 {
-	SendReceive( EBtHidSearch, TIpcArgs(), aStatus );
+	Search( aStatus, EBtHidUnknown );
+}
+
+EXPORT_C void RBtHidManager::Search( TRequestStatus &aStatus, TInt aType )
+{
+	SendReceive( EBtHidSearch, TIpcArgs( aType ), aStatus );
+}
+
+EXPORT_C TInt RBtHidManager::Forget( TInt aType )
+{
+	return SendReceive( EBtHidForget, TIpcArgs( aType ));
 }
 
 EXPORT_C void RBtHidManager::CancelSearch()

@@ -17,10 +17,11 @@ enum TBtHidOpcode
 {
 	EBtHidWaitEvent,    // async: arg0 = TPckgBuf<THIDEvent>, se completa con el proximo evento
 	EBtHidCancelWait,
-	EBtHidSearch,       // async: cuadro de busqueda
+	EBtHidSearch,       // async: cuadro de busqueda, arg0 = tipo (0 = el que diga el dispositivo)
 	EBtHidCancelSearch,
 	EBtHidForgetAll,
-	EBtHidStatus        // arg0 = TBtHidStatusPckg
+	EBtHidStatus,       // arg0 = TBtHidStatusPckg
+	EBtHidForget        // arg0 = tipo
 };
 
 // arranca bthidhostsrv.exe y espera a que este listo (si ya corre, devuelve KErrNone igual)

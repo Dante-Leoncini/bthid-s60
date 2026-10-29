@@ -40,7 +40,7 @@ enum TTextId
 	ETxtApps, ETxtSearchFailed, ETxtHint1, ETxtHint2, ETxtNoServer, ETxtServerDead,
 	ETxtMenuFind, ETxtMenuTests, ETxtMenuTestMouse, ETxtMenuTestKeys, ETxtMenuForget, ETxtMenuExit,
 	ETxtMouseHelp1, ETxtMouseHelp2, ETxtMouseSize, ETxtKeysHelp, ETxtKeysHeld, ETxtDown, ETxtUp, ETxtNoEvents,
-	ETxtWaiting,
+	ETxtWaiting, ETxtNone, ETxtMenuPickMouse, ETxtMenuPickKeys, ETxtMenuForgetMouse, ETxtMenuForgetKeys,
 	ETxtCount
 };
 
@@ -74,6 +74,11 @@ static const TText *const KTextEn[ETxtCount] =
 	_S( "up" ),
 	_S( "no events (%d)" ),
 	_S( "   waiting: move it or click" ),
+	_S( "none" ),
+	_S( "Choose mouse" ),
+	_S( "Choose keyboard" ),
+	_S( "Remove mouse" ),
+	_S( "Remove keyboard" ),
 };
 
 static const TText *const KTextEs[ETxtCount] =
@@ -106,6 +111,11 @@ static const TText *const KTextEs[ETxtCount] =
 	_S( "arriba" ),
 	_S( "sin eventos (%d)" ),
 	_S( "   esperando: movelo o hac\x00e9 click" ),
+	_S( "ninguno" ),
+	_S( "Elegir mouse" ),
+	_S( "Elegir teclado" ),
+	_S( "Quitar mouse" ),
+	_S( "Quitar teclado" ),
 };
 
 static TBool gSpanish;
@@ -465,10 +475,10 @@ public:
 		CActiveScheduler::Add( this );
 	}
 	~CSearch() { Cancel(); }
-	void Start()
+	void Start( TInt aType )
 	{
 		if( IsActive()) return;
-		iMgr.Search( iStatus );
+		iMgr.Search( iStatus, aType );
 		SetActive();
 	}
 	TInt LastError() const { return iLast; }
@@ -571,9 +581,11 @@ private:
 	{
 		if( aResourceId == R_MGR_MENU )
 		{
-			aMenuPane->SetItemTextL( EBtHidCmdSearch, Txt( ETxtMenuFind ));
+			aMenuPane->SetItemTextL( EBtHidCmdPickMouse, Txt( ETxtMenuPickMouse ));
+			aMenuPane->SetItemTextL( EBtHidCmdPickKeyboard, Txt( ETxtMenuPickKeys ));
 			aMenuPane->SetItemTextL( EBtHidCmdTests, Txt( ETxtMenuTests ));
-			aMenuPane->SetItemTextL( EBtHidCmdForget, Txt( ETxtMenuForget ));
+			aMenuPane->SetItemTextL( EBtHidCmdForgetMouse, Txt( ETxtMenuForgetMouse ));
+			aMenuPane->SetItemTextL( EBtHidCmdForgetKeyboard, Txt( ETxtMenuForgetKeys ));
 			aMenuPane->SetItemTextL( EAknCmdExit, Txt( ETxtMenuExit ));
 		}
 		else if( aResourceId == R_MGR_TESTS_MENU )
@@ -597,9 +609,16 @@ private:
 	{
 		switch( aCommand )
 		{
-		case EBtHidCmdSearch:
+		case EBtHidCmdPickMouse:
+		case EBtHidCmdPickKeyboard:
 			if( iConnectErr == KErrNone )
-				iSearch->Start();
+				iSearch->Start( aCommand == EBtHidCmdPickKeyboard ? EBtHidKeyboard : EBtHidMouse );
+			break;
+		case EBtHidCmdForgetMouse:
+		case EBtHidCmdForgetKeyboard:
+			if( iConnectErr == KErrNone )
+				iMgr.Forget( aCommand == EBtHidCmdForgetKeyboard ? EBtHidKeyboard : EBtHidMouse );
+			Refresh();
 			break;
 		case EBtHidCmdTestMouse:
 			SetMode( EModeMouse );
@@ -667,30 +686,39 @@ void CMgrAppUi::Refresh()
 		return;
 	}
 
-	if( !st().iCount )
+	// un renglon fijo para el mouse y otro para el teclado ("ninguno" si no hay), con su estado abajo
+	for( TInt slot = EBtHidMouse; slot <= EBtHidKeyboard; slot++ )
 	{
-		AddLine( Txt( ETxtNoDevices ));
-		AddLine( Txt( ETxtFindHint ));
-	}
-	for( i = 0; i < st().iCount; i++ )
-	{
-		const TBtHidDeviceInfo &d = st().iDevice[i];
+		TPtrC kind = Txt( slot == EBtHidKeyboard ? ETxtKeyboard : ETxtMouse );
+		const TBtHidDeviceInfo *d = NULL;
+		for( i = 0; i < st().iCount; i++ )
+		{
+			TInt type = st().iDevice[i].iType ? st().iDevice[i].iType : EBtHidMouse; // sin tipo = mouse
+			if( type == slot )
+				d = &st().iDevice[i];
+		}
+		if( !d )
+		{
+			TPtrC none = Txt( ETxtNone );
+			line.Format( _L( "%S: %S" ), &kind, &none );
+			AddLine( line );
+			continue;
+		}
 		TBuf<32> name;
-		TPtrC    kind = Txt( d.iType == EBtHidKeyboard ? ETxtKeyboard : ETxtMouse );
-		name.Copy( d.iName );
+		name.Copy( d->iName );
 		if( !name.Length())
-			name.Format( _L( "%02x:%02x:%02x:%02x:%02x:%02x" ), d.iAddr[0], d.iAddr[1], d.iAddr[2], d.iAddr[3], d.iAddr[4], d.iAddr[5] );
+			name.Format( _L( "%02x:%02x:%02x:%02x:%02x:%02x" ), d->iAddr[0], d->iAddr[1], d->iAddr[2], d->iAddr[3], d->iAddr[4], d->iAddr[5] );
 		line.Format( _L( "%S: %S" ), &kind, &name );
 		AddLine( line );
-		if( d.iState == EBtHidConnected )
+		if( d->iState == EBtHidConnected )
 			AddLine( Txt( ETxtConnected ));
-		else if( d.iState == EBtHidConnecting )
+		else if( d->iState == EBtHidConnecting )
 			AddLine( Txt( ETxtConnecting ));
-		else if( d.iState == EBtHidWaiting )
+		else if( d->iState == EBtHidWaiting )
 			AddLine( Txt( ETxtWaiting ));
 		else
 		{
-			line.Format( Txt( ETxtNotConnected ), d.iError );
+			line.Format( Txt( ETxtNotConnected ), d->iError );
 			AddLine( line );
 		}
 	}

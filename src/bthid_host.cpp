@@ -880,10 +880,11 @@ void CBtHidHost::AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &a
 		iDev[slot]->Wait();
 }
 
-void CBtHidHost::SelectDevice()
+void CBtHidHost::SelectDevice( TInt aType )
 {
 	if( IsActive())
 		return;
+	iSelectType = aType;
 	if( !iNotifierOpen )
 	{
 		if( iNotifier.Connect() != KErrNone )
@@ -910,7 +911,9 @@ void CBtHidHost::RunL()
 		return;
 	}
 
-	if( iResp().IsValidDeviceClass())
+	if( iSelectType )
+		type = iSelectType; // lo eligio el usuario (Elegir mouse / Elegir teclado)
+	else if( iResp().IsValidDeviceClass())
 	{
 		TBTDeviceClass cls = iResp().DeviceClass();
 		if( cls.MajorDeviceClass() == EMajorDevicePeripheral )
@@ -951,6 +954,21 @@ void CBtHidHost::DoCancel()
 {
 	iNotifier.CancelNotifier( KDeviceSelectionNotifierUid );
 	iObserver.BtHidSearchDone( KErrCancel );
+}
+
+void CBtHidHost::Forget( TInt aType )
+{
+	TInt i;
+	for( i = 0; i < EMaxDevices; i++ )
+	{
+		// los guardados sin tipo cuentan como mouse
+		if( iDev[i] && ( iDev[i]->Type() == aType || ( !iDev[i]->Type() && aType == EBtHidMouse )))
+		{
+			delete iDev[i];
+			iDev[i] = NULL;
+		}
+	}
+	Save();
 }
 
 void CBtHidHost::ForgetAll()

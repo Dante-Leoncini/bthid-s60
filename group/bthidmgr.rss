@@ -25,10 +25,12 @@ RESOURCE MENU_PANE r_mgr_menu
 {
 	items =
 	{
-		MENU_ITEM { command = EBtHidCmdSearch; txt = "Find device"; },
-		MENU_ITEM { command = EBtHidCmdTests;  txt = "Tests"; cascade = r_mgr_tests_menu; },
-		MENU_ITEM { command = EBtHidCmdForget; txt = "Forget all"; },
-		MENU_ITEM { command = EAknCmdExit;     txt = "Exit"; }
+		MENU_ITEM { command = EBtHidCmdPickMouse;      txt = "Choose mouse"; },
+		MENU_ITEM { command = EBtHidCmdPickKeyboard;   txt = "Choose keyboard"; },
+		MENU_ITEM { command = EBtHidCmdTests;          txt = "Tests"; cascade = r_mgr_tests_menu; },
+		MENU_ITEM { command = EBtHidCmdForgetMouse;    txt = "Remove mouse"; },
+		MENU_ITEM { command = EBtHidCmdForgetKeyboard; txt = "Remove keyboard"; },
+		MENU_ITEM { command = EAknCmdExit;             txt = "Exit"; }
 	};
 }
 

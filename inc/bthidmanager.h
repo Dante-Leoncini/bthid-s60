@@ -38,8 +38,12 @@ public:
 	// abre el cuadro de busqueda de Bluetooth del telefono; termina cuando se elige uno (o se cancela) y el
 	// elegido queda guardado y conectandose
 	IMPORT_C void Search( TRequestStatus &aStatus );
+	// lo mismo, eligiendo que es (EBtHidMouse / EBtHidKeyboard): reemplaza al que habia de ese tipo
+	IMPORT_C void Search( TRequestStatus &aStatus, TInt aType );
 	IMPORT_C void CancelSearch();
 	IMPORT_C TInt ForgetAll();
+	// olvidar el mouse o el teclado
+	IMPORT_C TInt Forget( TInt aType );
 	IMPORT_C TInt Status( TBtHidStatusPckg &aStatus );
 };
 

@@ -5,4 +5,6 @@ EXPORTS
 	_ZN13RBtHidManager12CancelSearchEv @ 4 NONAME
 	_ZN13RBtHidManager9ForgetAllEv @ 5 NONAME
 	_ZN13RBtHidManager6StatusER8TPckgBufI12TBtHidStatusE @ 6 NONAME
+	_ZN13RBtHidManager6SearchER14TRequestStatusi @ 7 NONAME
+	_ZN13RBtHidManager6ForgetEi @ 8 NONAME
 

@@ -153,6 +153,11 @@ void CBtHidSession::ServiceL( const RMessage2 &aMessage )
 			Server().Host()->ForgetAll();
 		aMessage.Complete( KErrNone );
 		return;
+	case EBtHidForget:
+		if( Server().Host())
+			Server().Host()->Forget( aMessage.Int0());
+		aMessage.Complete( KErrNone );
+		return;
 	case EBtHidStatus:
 		{
 			TBtHidStatusPckg st;
@@ -281,7 +286,7 @@ void CBtHidServer::Search( const RMessage2 &aMessage )
 	}
 	iSearchMsg = aMessage;
 	iSearchSession = static_cast<CBtHidSession *>( aMessage.Session());
-	iHost->SelectDevice();
+	iHost->SelectDevice( aMessage.Int0());
 }
 
 void CBtHidServer::CancelSearch( CBtHidSession *aSession )

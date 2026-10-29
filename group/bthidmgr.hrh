@@ -7,7 +7,11 @@ enum TBtHidMgrCommands
 	EBtHidCmdForget,
 	EBtHidCmdTests,
 	EBtHidCmdTestMouse,
-	EBtHidCmdTestKeys
+	EBtHidCmdTestKeys,
+	EBtHidCmdPickMouse,
+	EBtHidCmdPickKeyboard,
+	EBtHidCmdForgetMouse,
+	EBtHidCmdForgetKeyboard
 };
 
 #endif
