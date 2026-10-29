@@ -155,7 +155,7 @@ void CBtHidSession::ServiceL( const RMessage2 &aMessage )
 	case EBtHidStatus:
 		{
 			TBtHidStatusPckg st;
-			Mem::FillZ( &st(), sizeof( TBtHidStatus ));
+			st().iCount = 0; // sin Mem::FillZ: pondria en 0 el largo maximo de los TBuf8 de los nombres (USER 23)
 			if( Server().Host())
 				Server().Host()->GetStatus( st());
 			st().iClients = Server().Clients();
