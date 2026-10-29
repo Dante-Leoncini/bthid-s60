@@ -458,7 +458,7 @@ void CBtHidHost::Load()
 		f.Read( data );
 		f.Close();
 	}
-	fs.Close();
+	BtHidCloseFs( fs );
 	for( i = 0; i + 8 <= data.Length(); )
 	{
 		TInt len = data[i + 7];
@@ -491,5 +491,5 @@ void CBtHidHost::Save()
 		f.Write( data );
 		f.Close();
 	}
-	fs.Close();
+	BtHidCloseFs( fs );
 }

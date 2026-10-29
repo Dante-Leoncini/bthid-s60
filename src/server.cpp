@@ -196,7 +196,7 @@ void CBtHidServer::ConstructL()
 	User::LeaveIfError( fs.Connect());
 	fs.CreatePrivatePath( EDriveC );
 	fs.PrivatePath( file );
-	fs.Close();
+	BtHidCloseFs( fs );
 	file.Insert( 0, _L( "c:" ));
 	file.Append( _L( "devices.dat" ));
 	iHost = CBtHidHost::NewL( *this, file );
@@ -351,14 +351,14 @@ void CBtHidServer::BtHidLog( const char *aMsg )
 		return;
 	if( f.Open( fs, KLog, EFileWrite ) != KErrNone && f.Create( fs, KLog, EFileWrite ) != KErrNone )
 	{
-		fs.Close();
+		BtHidCloseFs( fs );
 		return;
 	}
 	f.Seek( ESeekEnd, pos );
 	f.Write( TPtrC8( (const TUint8 *)aMsg, User::StringLength( (const TUint8 *)aMsg )));
 	f.Write( _L8( "\r\n" ));
 	f.Close();
-	fs.Close();
+	BtHidCloseFs( fs );
 }
 
 /* ------------------------------------------------------------------ */

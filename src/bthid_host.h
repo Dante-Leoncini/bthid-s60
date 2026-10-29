@@ -10,9 +10,14 @@ teclado. (El hidsrv de Hinkka, en cambio, convierte cada reporte en un "click" y
 
 #include <e32base.h>
 #include <es_sock.h>
+#include <f32file.h>
 #include <bttypes.h>
 #include <btextnotifiers.h>
 #include "bthidmanager.h"
+
+/* RFs::Close no existe en S60 3rd (ahi es el de RHandleBase): el SDK de Symbian^3 lo declara en RFs y si se
+   importa ese el exe no carga en el telefono */
+inline void BtHidCloseFs( RFs &aFs ) { static_cast<RHandleBase &>( aFs ).Close(); }
 
 class MBtHidObserver
 {
