@@ -5,8 +5,9 @@ eventos a las apps conectadas (cada una con su cola), en el formato THIDEvent de
 A diferencia del hidsrv de Hinkka, los botones llegan como apretado (EEventButtonDown) al apretar y soltado
 (EEventButtonUp) al soltar, de verdad: se puede mantener apretado y arrastrar.
 
-Arranca con la primera app que se conecta (bthidhost.dll o la app "Bluetooth HID") y se cierra un rato
-despues de que se va la ultima.
+Arranca con la primera app que se conecta (bthidhost.dll o la app "Bluetooth HID"). Si hay dispositivos
+guardados sigue corriendo, escuchando, para que el mouse se reconecte solo; si no, se cierra un rato despues de
+que se va la ultima app.
 */
 
 #include <e32base.h>
@@ -233,7 +234,9 @@ void CBtHidServer::DropSession( CBtHidSession *aSession )
 		if( iHost )
 			iHost->CancelSelect();
 	}
-	if( --iSessions <= 0 && iShutdown )
+	// con dispositivos guardados seguimos corriendo: el mouse se reconecta solo cuando se lo mueve (nos llama
+	// a nosotros) y para eso alguien tiene que estar escuchando. Sin dispositivos no hay para que
+	if( --iSessions <= 0 && iShutdown && ( !iHost || !iHost->DeviceCount()))
 	{
 		iShutdown->Cancel();
 		iShutdown->Start( KShutdownDelay, KShutdownDelay, TCallBack( Shutdown, this ));

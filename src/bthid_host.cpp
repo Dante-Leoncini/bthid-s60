@@ -33,6 +33,9 @@ const TInt   KMaxHidDesc      = 512;
 const TUint8 KHidpDataInput   = 0xA1;  // HIDP DATA, reporte de entrada
 const TInt   KRetryFirstUs    = 3000000;
 const TInt   KRetryUs         = 8000000;
+const TInt   KRetrySlowUs     = 60000000; // despues de varios fallos: casi todos los mouse no contestan si los
+                                          // llama el telefono, se conectan ellos al moverlos; llamar seguido
+                                          // ocupa la radio y no los deja entrar
 const TInt   KWaitIntrUs      = 5000000;  // conexion entrante: control llego, esperando el canal de datos
 
 class CBtHidDevice;
@@ -300,7 +303,7 @@ void CBtHidDevice::Retry( TInt aErr )
 	iState = EWaitRetry;
 	if( !iTimerOpen )
 		return;
-	iTimer.After( iStatus, iFails < 3 ? KRetryFirstUs : KRetryUs );
+	iTimer.After( iStatus, iFails < 3 ? KRetryFirstUs : iFails < 6 ? KRetryUs : KRetrySlowUs );
 	SetActive();
 }
 
@@ -494,8 +497,10 @@ TBool CBtHidDevice::LayoutReport( const TDesC8 &aData )
 		id = aData[1];
 		start = 2;
 	}
+	// un reporte que el descriptor no conoce no es nuestro. Mas corto que lo declarado si vale: hay mouse que no
+	// mandan el ultimo byte (la rueda) si no se movio; lo que falta queda en 0 (HidField)
 	bytes = ( iLayout.iReportBits[id] + 7 ) / 8;
-	if( !bytes || aData.Length() - start < bytes )
+	if( !bytes || aData.Length() <= start )
 		return EFalse;
 	TPtrC8 p = aData.Mid( start );
 

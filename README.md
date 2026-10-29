@@ -10,8 +10,10 @@ directo al dispositivo, lee los reportes tal cual vienen y manda apretado al apr
 ## Que se instala
 
 - `bthidhostsrv.exe`: servidor sin interfaz. Se queda con la conexion Bluetooth del mouse y el teclado
-  (canales HID L2CAP 0x11 y 0x13, protocolo boot) y reparte los eventos a las apps conectadas. Arranca solo
-  con la primera app y se cierra un minuto despues de la ultima. Guarda los dispositivos en
+  (canales HID L2CAP 0x11 y 0x13) y reparte los eventos a las apps conectadas. El formato de los reportes lo
+  saca del descriptor HID que el dispositivo publica por SDP (`hidparse.cpp`); sin descriptor usa el protocolo
+  boot. Arranca solo con la primera app; si hay dispositivos guardados sigue corriendo y escuchando, para que el
+  mouse se reconecte solo al moverlo (la mayoria no contesta si los llama el telefono). Guarda los dispositivos en
   `c:\private\e0d69650\devices.dat` y deja un log corto en `c:\data\bthid_log.txt`.
 - `bthidhost.dll`: la misma API que el `hidsrv.dll` de Hinkka (`bthidclient.h`, `bthidevent.h`), con
   `GetHIDClientAPI` en el ordinal 1. Ademas trae `RBtHidManager` (`bthidmanager.h`) para administrar los
