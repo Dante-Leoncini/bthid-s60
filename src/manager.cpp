@@ -1,9 +1,13 @@
 /*
-manager.cpp - bthidmgr.exe, la app "Bluetooth HID": buscar, ver y olvidar el mouse y el teclado del servidor
+manager.cpp - bthidmgr.exe, la app "Bluetooth HID": buscar, ver y olvidar el mouse y el teclado del servidor,
+y probarlos.
 
 Opciones > Buscar dispositivo abre el cuadro de Bluetooth del telefono; el elegido queda guardado en el
-servidor y se reconecta solo cada vez que una app lo usa. Abajo hay una prueba: la app recibe los eventos como
-cualquier juego (GetHIDClientAPI) y muestra los botones apretados, el movimiento, la rueda y la ultima tecla.
+servidor y se reconecta solo cada vez que una app lo usa. Opciones > Pruebas: la app recibe los eventos como
+cualquier juego (GetHIDClientAPI). En la del mouse se arrastra un cuadrado con cualquiera de los tres botones y
+la rueda le cambia el tamano; en la del teclado se ven las teclas apretadas y lo que se escribe.
+
+Textos en ingles o en castellano segun el idioma del telefono.
 */
 
 #include <aknapp.h>
@@ -12,122 +16,438 @@ cualquier juego (GetHIDClientAPI) y muestra los botones apretados, el movimiento
 #include <eikstart.h>
 #include <coecntrl.h>
 #include <eikenv.h>
+#include <eikmenup.h>
+#include <eikbtgpc.h>
 #include <gdi.h>
+#include <fbs.h>
 #include <badesca.h>
 #include <avkon.hrh>
+#include <avkon.rsg>
+#include <bthidmgr.rsg>
 #include "bthidmanager.h"
 #include "bthidclient.h"
 #include "bthidmgr.hrh"
+#include "cursor.h"
 
 const TUid KUidBtHidMgr = { 0xE0D69652 };
 
 /* ------------------------------------------------------------------ */
+/* textos */
 
-/* lo que muestra la prueba */
-struct TMgrTest
+enum TTextId
 {
-	TInt   iButtons;   // bits 0 izquierdo, 1 derecho, 2 medio
-	TPoint iPos;       // punto que se mueve con el mouse (dentro del recuadro)
-	TInt   iWheel;
-	TInt   iKey;       // ultima tecla (codigo HID), 0 = ninguna
-	TBool  iKeyDown;
-	TInt   iEvents;
-	TInt   iError;     // si no se pudo conectar para recibir eventos
+	ETxtNoDevices, ETxtFindHint, ETxtKeyboard, ETxtMouse, ETxtConnected, ETxtConnecting, ETxtNotConnected,
+	ETxtApps, ETxtSearchFailed, ETxtHint1, ETxtHint2, ETxtNoServer, ETxtServerDead,
+	ETxtMenuFind, ETxtMenuTests, ETxtMenuTestMouse, ETxtMenuTestKeys, ETxtMenuForget, ETxtMenuExit,
+	ETxtMouseHelp1, ETxtMouseHelp2, ETxtMouseSize, ETxtKeysHelp, ETxtKeysHeld, ETxtDown, ETxtUp, ETxtNoEvents,
+	ETxtCount
 };
+
+static const TText *const KTextEn[ETxtCount] =
+{
+	_S( "No devices." ),
+	_S( "Options > Find device" ),
+	_S( "Keyboard" ),
+	_S( "Mouse" ),
+	_S( "   connected" ),
+	_S( "   connecting..." ),
+	_S( "   not connected (%d), retrying" ),
+	_S( "Apps using it: %d" ),
+	_S( "Search failed (%d)" ),
+	_S( "Not connecting? Put the device" ),
+	_S( "in pairing mode and Find again" ),
+	_S( "The server won't start (%d)" ),
+	_S( "The server is not responding" ),
+	_S( "Find device" ),
+	_S( "Tests" ),
+	_S( "Test mouse" ),
+	_S( "Test keyboard" ),
+	_S( "Forget all" ),
+	_S( "Exit" ),
+	_S( "Drag the square with any button" ),
+	_S( "Wheel: bigger / smaller" ),
+	_S( "size %d" ),
+	_S( "Type on the Bluetooth keyboard" ),
+	_S( "Held: " ),
+	_S( "down" ),
+	_S( "up" ),
+	_S( "no events (%d)" ),
+};
+
+static const TText *const KTextEs[ETxtCount] =
+{
+	_S( "Sin dispositivos." ),
+	_S( "Opciones > Buscar dispositivo" ),
+	_S( "Teclado" ),
+	_S( "Mouse" ),
+	_S( "   conectado" ),
+	_S( "   conectando..." ),
+	_S( "   sin conexi\x00f3n (%d), reintentando" ),
+	_S( "Apps us\x00e1ndolo: %d" ),
+	_S( "La b\x00fasqueda fall\x00f3 (%d)" ),
+	_S( "\x00bfNo conecta? Pon\x00e9 el dispositivo" ),
+	_S( "en modo emparejar y busc\x00e1 de nuevo" ),
+	_S( "No arranca el servidor (%d)" ),
+	_S( "El servidor no responde" ),
+	_S( "Buscar dispositivo" ),
+	_S( "Pruebas" ),
+	_S( "Probar mouse" ),
+	_S( "Probar teclado" ),
+	_S( "Olvidar todos" ),
+	_S( "Salir" ),
+	_S( "Arrastr\x00e1 el cuadrado con cualquier bot\x00f3n" ),
+	_S( "Rueda: m\x00e1s grande / m\x00e1s chico" ),
+	_S( "tama\x00f1o %d" ),
+	_S( "Escrib\x00ed con el teclado Bluetooth" ),
+	_S( "Apretadas: " ),
+	_S( "abajo" ),
+	_S( "arriba" ),
+	_S( "sin eventos (%d)" ),
+};
+
+static TBool gSpanish;
+
+static TPtrC Txt( TInt aId )
+{
+	return TPtrC( gSpanish ? KTextEs[aId] : KTextEn[aId] );
+}
+
+/* ------------------------------------------------------------------ */
+/* teclas (codigos de uso HID) para la prueba del teclado */
+
+static TInt UsageChar( TInt aUsage, TBool aShift )
+{
+	static const char kNum[]     = "1234567890";
+	static const char kNumSh[]   = "!@#$%^&*()";
+	static const char kPunct[]   = "-=[]\\#;'`,./"; // 0x2d..0x38
+	static const char kPunctSh[] = "_+{}|~:\"~<>?";
+
+	if( aUsage >= 0x04 && aUsage <= 0x1d )
+		return ( aShift ? 'A' : 'a' ) + aUsage - 0x04;
+	if( aUsage >= 0x1e && aUsage <= 0x27 )
+		return ( aShift ? kNumSh : kNum )[aUsage - 0x1e];
+	if( aUsage == 0x2c )
+		return ' ';
+	if( aUsage >= 0x2d && aUsage <= 0x38 )
+		return ( aShift ? kPunctSh : kPunct )[aUsage - 0x2d];
+	return 0;
+}
+
+static void UsageName( TInt aUsage, TDes &aName )
+{
+	static const TText *const kMods[8] = { _S( "Ctrl" ), _S( "Shift" ), _S( "Alt" ), _S( "Win" ),
+		_S( "Ctrl Der" ), _S( "Shift Der" ), _S( "AltGr" ), _S( "Win Der" ) };
+	TInt c = UsageChar( aUsage, EFalse );
+
+	aName.Zero();
+	if( aUsage >= 224 && aUsage <= 231 ) aName = TPtrC( kMods[aUsage - 224] );
+	else if( aUsage == 0x2c ) aName = _L( "Space" );
+	else if( c ) aName.Append( c );
+	else if( aUsage == 0x28 ) aName = _L( "Enter" );
+	else if( aUsage == 0x29 ) aName = _L( "Esc" );
+	else if( aUsage == 0x2a ) aName = _L( "Backspace" );
+	else if( aUsage == 0x2b ) aName = _L( "Tab" );
+	else if( aUsage >= 0x3a && aUsage <= 0x45 ) aName.Format( _L( "F%d" ), aUsage - 0x3a + 1 );
+	else if( aUsage == 0x4f ) aName = _L( "->" );
+	else if( aUsage == 0x50 ) aName = _L( "<-" );
+	else if( aUsage == 0x51 ) aName = _L( "v" );
+	else if( aUsage == 0x52 ) aName = _L( "^" );
+	else aName.Format( _L( "0x%02x" ), aUsage );
+}
+
+/* ------------------------------------------------------------------ */
+
+enum TMgrMode { EModeStatus, EModeMouse, EModeKeys };
 
 class CMgrView : public CCoeControl
 {
 public:
+	~CMgrView()
+	{
+		delete iCursor;
+		delete iCursorMask;
+		delete iKeyLines;
+	}
+
 	void ConstructL( const TRect &aRect )
 	{
 		CreateWindowL();
 		SetRect( aRect );
+		iKeyLines = new( ELeave ) CDesCArrayFlat( 8 );
+		TRAP_IGNORE( LoadCursorL());
+		ResetTests();
 		ActivateL();
 	}
-	void SetLines( const CDesCArray *aLines ) { iLines = aLines; DrawDeferred(); }
-	void SetTest( const TMgrTest *aTest ) { iTest = aTest; }
 
-	/* recuadro de la prueba: la mitad de abajo de la pantalla */
-	TRect TestRect() const
+	void SetLines( const CDesCArray *aLines ) { iLines = aLines; if( iMode == EModeStatus ) DrawDeferred(); }
+	void SetEventError( TInt aErr ) { iEventErr = aErr; }
+
+	void SetMode( TMgrMode aMode )
 	{
-		TRect r = Rect();
-		r.iTl.iY = r.iTl.iY + r.Height() / 2;
-		r.Shrink( 6, 6 );
-		return r;
+		iMode = aMode;
+		ResetTests();
+		DrawNow();
+	}
+	TMgrMode Mode() const { return iMode; }
+
+	void HidEvent( const THIDEvent &aEv )
+	{
+		iEvents++;
+		if( aEv.Type() == THIDEvent::EMouseEvent )
+			MouseEvent( *aEv.Mouse());
+		else if( aEv.Type() == THIDEvent::EKeyEvent )
+			KeyEvent( aEv.Key()->ScanCode(), aEv.Key()->Type() == EEventHIDKeyDown );
+		if( iMode != EModeStatus )
+			DrawDeferred();
 	}
 
 private:
+	/* el cursor de Whisk3D: color + mascara de 256 grises con el alfa del PNG */
+	void LoadCursorL()
+	{
+		TBuf8<KCursorWidth * 3> line;
+		TBuf8<KCursorWidth>     alpha;
+		TInt                    x, y;
+
+		iCursor = new( ELeave ) CFbsBitmap;
+		User::LeaveIfError( iCursor->Create( TSize( KCursorWidth, KCursorHeight ), EColor16M ));
+		iCursorMask = new( ELeave ) CFbsBitmap;
+		User::LeaveIfError( iCursorMask->Create( TSize( KCursorWidth, KCursorHeight ), EGray256 ));
+		for( y = 0; y < KCursorHeight; y++ )
+		{
+			line.SetLength( KCursorWidth * 3 );
+			alpha.SetLength( KCursorWidth );
+			for( x = 0; x < KCursorWidth; x++ )
+			{
+				const TUint8 *p = KCursorRgba + ( y * KCursorWidth + x ) * 4;
+				line[x * 3]     = p[2]; // EColor16M va en BGR
+				line[x * 3 + 1] = p[1];
+				line[x * 3 + 2] = p[0];
+				alpha[x]        = p[3];
+			}
+			iCursor->SetScanLine( line, y );
+			iCursorMask->SetScanLine( alpha, y );
+		}
+	}
+
+	void ResetTests()
+	{
+		TRect r = Rect();
+		iPos = r.Center();
+		iSquare = TRect( r.Center() - TPoint( 30, 30 ), TSize( 60, 60 ));
+		iButtons = iGrab = 0;
+		iMods = 0;
+		iTyped.Zero();
+		if( iKeyLines ) iKeyLines->Reset();
+	}
+
+	static TInt ButtonBit( TInt aValue )
+	{
+		return aValue == EMouseButtonRight ? 2 : aValue == EMouseButtonMiddle ? 4 : 1;
+	}
+
+	void MouseEvent( const TMouseEvent &aMouse )
+	{
+		TRect r = Rect();
+		TInt  bit = ButtonBit( aMouse.iValue );
+
+		switch( aMouse.iType )
+		{
+		case EEventRelativeXY:
+			{
+				TPoint old = iPos;
+				iPos += aMouse.iPosition;
+				if( iPos.iX < r.iTl.iX ) iPos.iX = r.iTl.iX;
+				if( iPos.iY < r.iTl.iY ) iPos.iY = r.iTl.iY;
+				if( iPos.iX >= r.iBr.iX ) iPos.iX = r.iBr.iX - 1;
+				if( iPos.iY >= r.iBr.iY ) iPos.iY = r.iBr.iY - 1;
+				if( iGrab )
+					iSquare.Move( iPos - old );
+			}
+			break;
+		case EEventButtonDown:
+			iButtons |= bit;
+			if( !iGrab && iSquare.Contains( iPos ))
+				iGrab = bit;
+			break;
+		case EEventButtonUp:
+			iButtons &= ~bit;
+			if( iGrab == bit )
+				iGrab = 0;
+			break;
+		case EEventRelativeWheel:
+			{
+				TPoint c = iSquare.Center();
+				TInt   size = iSquare.Width() + aMouse.iValue * 8;
+				if( size < 16 ) size = 16;
+				if( size > r.Height() - 20 ) size = r.Height() - 20;
+				iSquare = TRect( c - TPoint( size / 2, size / 2 ), TSize( size, size ));
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
+	void KeyEvent( TInt aUsage, TBool aDown )
+	{
+		TBuf<48> line, name;
+		TInt     c;
+
+		if( aUsage >= 224 && aUsage <= 231 )
+		{
+			if( aDown ) iMods |= 1 << ( aUsage - 224 );
+			else iMods &= ~( 1 << ( aUsage - 224 ));
+		}
+		UsageName( aUsage, name );
+		TPtrC state = Txt( aDown ? ETxtDown : ETxtUp );
+		line.Format( _L( "%S  %S" ), &name, &state );
+		if( iKeyLines->Count() >= 6 )
+			iKeyLines->Delete( 0 );
+		TRAP_IGNORE( iKeyLines->AppendL( line ));
+
+		if( !aDown )
+			return;
+		c = UsageChar( aUsage, ( iMods & 0x22 ) != 0 );
+		if( c && iTyped.Length() < iTyped.MaxLength())
+			iTyped.Append( c );
+		else if( aUsage == 0x2a && iTyped.Length())
+			iTyped.SetLength( iTyped.Length() - 1 );
+		else if( aUsage == 0x28 )
+			iTyped.Zero();
+	}
+
 	void Draw( const TRect & ) const
 	{
-		CWindowGc &gc = SystemGc();
+		CWindowGc   &gc = SystemGc();
 		const CFont *font = CEikonEnv::Static()->DenseFont();
-		TInt y, i;
 
 		gc.SetBrushStyle( CGraphicsContext::ESolidBrush );
 		gc.SetBrushColor( KRgbWhite );
 		gc.Clear( Rect());
 		gc.UseFont( font );
 		gc.SetPenColor( KRgbBlack );
-		y = font->AscentInPixels() + 3;
-		for( i = 0; iLines && i < iLines->Count(); i++ )
-		{
-			gc.DrawText( ( *iLines )[i], TPoint( 6, y ));
-			y += font->HeightInPixels() + 1;
-		}
-		if( iTest )
-			DrawTest( gc, font );
+		if( iMode == EModeMouse )
+			DrawMouseTest( gc, font );
+		else if( iMode == EModeKeys )
+			DrawKeysTest( gc, font );
+		else
+			DrawLines( gc, font, iLines, font->AscentInPixels() + 3 );
 		gc.DiscardFont();
 	}
 
-	void DrawTest( CWindowGc &gc, const CFont *font ) const
+	TInt DrawLines( CWindowGc &gc, const CFont *font, const CDesCArray *aLines, TInt y ) const
 	{
-		_LIT( KNames, "IMD" ); // izquierdo, medio, derecho (en el orden del mouse)
-		static const TInt bits[3] = { 1, 4, 2 };
-		TRect    area = TestRect();
-		TBuf<64> text;
-		TInt     i, bw = 28, bh = 20;
+		TInt i;
+		for( i = 0; aLines && i < aLines->Count(); i++ )
+		{
+			gc.DrawText( ( *aLines )[i], TPoint( 4, y ));
+			y += font->HeightInPixels() + 1;
+		}
+		return y;
+	}
 
-		gc.SetBrushStyle( CGraphicsContext::ENullBrush );
-		gc.SetPenColor( KRgbDarkGray );
-		gc.DrawRect( area );
+	void DrawButtons( CWindowGc &gc, const CFont *font ) const
+	{
+		_LIT( KNames, "LMR" );
+		static const TInt bits[3] = { 1, 4, 2 }; // izquierdo, medio, derecho
+		TInt i, w = 16, h = font->HeightInPixels() + 2;
+		TInt x = Rect().iBr.iX - 3 * ( w + 2 ) - 2;
 
-		// botones arriba a la izquierda del recuadro: llenos mientras estan apretados
 		for( i = 0; i < 3; i++ )
 		{
-			TRect b( TPoint( area.iTl.iX + 4 + i * ( bw + 4 ), area.iTl.iY + 4 ), TSize( bw, bh ));
-			TBool down = ( iTest->iButtons & bits[i] ) != 0;
-			gc.SetBrushStyle( down ? CGraphicsContext::ESolidBrush : CGraphicsContext::ENullBrush );
+			TRect b( TPoint( x + i * ( w + 2 ), 2 ), TSize( w, h ));
+			gc.SetBrushStyle(( iButtons & bits[i] ) ? CGraphicsContext::ESolidBrush : CGraphicsContext::ENullBrush );
 			gc.SetBrushColor( KRgbRed );
 			gc.SetPenColor( KRgbBlack );
 			gc.DrawRect( b );
 			gc.SetBrushStyle( CGraphicsContext::ENullBrush );
-			gc.DrawText( KNames().Mid( i, 1 ), TPoint( b.iTl.iX + bw / 2 - 4, b.iTl.iY + font->AscentInPixels() + 2 ));
+			gc.DrawText( KNames().Mid( i, 1 ), TPoint( b.iTl.iX + 4, b.iTl.iY + font->AscentInPixels() + 1 ));
 		}
-
-		// el punto del mouse
-		gc.SetBrushStyle( CGraphicsContext::ESolidBrush );
-		gc.SetBrushColor( KRgbBlue );
-		gc.SetPenColor( KRgbBlue );
-		gc.DrawEllipse( TRect( iTest->iPos - TPoint( 3, 3 ), TSize( 7, 7 )));
-		gc.SetBrushStyle( CGraphicsContext::ENullBrush );
-		gc.SetPenColor( KRgbBlack );
-
-		if( iTest->iError )
-			text.Format( _L( "sin eventos (%d)" ), iTest->iError );
-		else if( iTest->iKey )
-		{
-			_LIT( KDown, "abajo" );
-			_LIT( KUp, "arriba" );
-			const TDesC &state = iTest->iKeyDown ? (const TDesC &)KDown : (const TDesC &)KUp;
-			text.Format( _L( "rueda %d  tecla 0x%02x %S  (%d)" ), iTest->iWheel, iTest->iKey, &state, iTest->iEvents );
-		}
-		else
-			text.Format( _L( "rueda %d  eventos %d" ), iTest->iWheel, iTest->iEvents );
-		gc.DrawText( text, TPoint( area.iTl.iX + 4, area.iBr.iY - 4 ));
 	}
 
+	void DrawMouseTest( CWindowGc &gc, const CFont *font ) const
+	{
+		TInt     y = font->AscentInPixels() + 3;
+		TBuf<48> text;
+		TRgb     fill = iGrab == 1 ? KRgbBlue : iGrab == 2 ? KRgbDarkGreen : iGrab == 4 ? TRgb( 255, 140, 0 ) : KRgbGray;
+
+		// el cuadrado: gris suelto; mientras se arrastra, azul (izquierdo), verde (derecho) o naranja (medio)
+		gc.SetBrushStyle( CGraphicsContext::ESolidBrush );
+		gc.SetBrushColor( fill );
+		gc.SetPenColor( KRgbBlack );
+		gc.DrawRect( iSquare );
+		gc.SetBrushStyle( CGraphicsContext::ENullBrush );
+
+		gc.DrawText( Txt( ETxtMouseHelp1 ), TPoint( 4, y ));
+		y += font->HeightInPixels() + 1;
+		gc.DrawText( Txt( ETxtMouseHelp2 ), TPoint( 4, y ));
+		y += font->HeightInPixels() + 1;
+		if( iEventErr )
+			text.Format( Txt( ETxtNoEvents ), iEventErr );
+		else
+			text.Format( Txt( ETxtMouseSize ), iSquare.Width());
+		gc.DrawText( text, TPoint( 4, y ));
+		DrawButtons( gc, font );
+
+		if( iCursor && iCursorMask )
+			gc.BitBltMasked( iPos, iCursor, TRect( TSize( KCursorWidth, KCursorHeight )), iCursorMask, EFalse );
+	}
+
+	void DrawKeysTest( CWindowGc &gc, const CFont *font ) const
+	{
+		static const TText *const kMods[8] = { _S( "Ctrl " ), _S( "Shift " ), _S( "Alt " ), _S( "Win " ),
+			_S( "Ctrl " ), _S( "Shift " ), _S( "AltGr " ), _S( "Win " ) };
+		TInt      y = font->AscentInPixels() + 3, i;
+		TBuf<80>  held;
+		TBuf<100> typed;
+		TRect     box;
+
+		gc.DrawText( Txt( ETxtKeysHelp ), TPoint( 4, y ));
+		y += font->HeightInPixels() + 4;
+
+		// lo escrito, en un recuadro, con un cursor al final
+		box = TRect( TPoint( 4, y - font->AscentInPixels() - 2 ), TSize( Rect().Width() - 8, font->HeightInPixels() + 4 ));
+		gc.SetPenColor( KRgbDarkGray );
+		gc.DrawRect( box );
+		gc.SetPenColor( KRgbBlack );
+		typed = iTyped.Right( 40 );
+		typed.Append( '_' );
+		gc.DrawText( typed, TPoint( 7, y ));
+		y += font->HeightInPixels() + 6;
+
+		held = Txt( ETxtKeysHeld );
+		for( i = 0; i < 8; i++ )
+			if( iMods & ( 1 << i ))
+				held.Append( TPtrC( kMods[i] ));
+		gc.DrawText( held, TPoint( 4, y ));
+		y += font->HeightInPixels() + 4;
+
+		if( iEventErr )
+		{
+			TBuf<32> err;
+			err.Format( Txt( ETxtNoEvents ), iEventErr );
+			gc.DrawText( err, TPoint( 4, y ));
+			y += font->HeightInPixels() + 1;
+		}
+		DrawLines( gc, font, iKeyLines, y );
+	}
+
+	TMgrMode          iMode;
 	const CDesCArray *iLines;
-	const TMgrTest   *iTest;
+	TInt              iEventErr;
+	TInt              iEvents;
+	CFbsBitmap       *iCursor;
+	CFbsBitmap       *iCursorMask;
+	// prueba del mouse
+	TPoint            iPos;
+	TRect             iSquare;
+	TInt              iButtons;  // bits 0 izquierdo, 1 derecho, 2 medio
+	TInt              iGrab;     // boton con el que se esta arrastrando (0 = ninguno)
+	// prueba del teclado
+	TInt              iMods;     // bits de los modificadores (224..231)
+	TBuf<200>         iTyped;
+	CDesCArray       *iKeyLines;
 };
 
 /* ------------------------------------------------------------------ */
@@ -162,7 +482,7 @@ private:
 class CEvents : public CActive
 {
 public:
-	CEvents( CMgrAppUi &aUi ) : CActive( EPriorityStandard ), iUi( aUi ) { CActiveScheduler::Add( this ); }
+	CEvents( CMgrView &aView ) : CActive( EPriorityStandard ), iView( aView ) { CActiveScheduler::Add( this ); }
 	~CEvents()
 	{
 		Cancel();
@@ -187,10 +507,22 @@ public:
 	}
 
 private:
-	void RunL();
+	void RunL()
+	{
+		THIDEvent ev;
+		if( iStatus.Int() != KErrNone )
+		{
+			iView.SetEventError( iStatus.Int()); // el servidor se cerro
+			return;
+		}
+		iClient->GetEvent( ev );
+		iView.HidEvent( ev );
+		iClient->EventReady( &iStatus );
+		SetActive();
+	}
 	void DoCancel() { iClient->EventReadyCancel(); }
 
-	CMgrAppUi     &iUi;
+	CMgrView      &iView;
 	MHIDSrvClient *iClient;
 };
 
@@ -199,6 +531,9 @@ class CMgrAppUi : public CAknAppUi
 public:
 	void ConstructL()
 	{
+		TLanguage lang = User::Language();
+		gSpanish = lang == ELangSpanish || lang == ELangLatinAmericanSpanish;
+
 		BaseConstructL( EAknEnableSkin );
 		iLines = new( ELeave ) CDesCArrayFlat( 8 );
 		iView = new( ELeave ) CMgrView;
@@ -206,10 +541,8 @@ public:
 		AddToStackL( iView );
 		iConnectErr = iMgr.Connect();
 		iSearch = new( ELeave ) CSearch( iMgr, *this );
-		iView->SetTest( &iTest );
-		iTest.iPos = iView->TestRect().Center();
-		iEvents = new( ELeave ) CEvents( *this );
-		iTest.iError = iEvents->Start();
+		iEvents = new( ELeave ) CEvents( *iView );
+		iView->SetEventError( iEvents->Start());
 		iTimer = CPeriodic::NewL( CActive::EPriorityStandard );
 		iTimer->Start( 0, 1000000, TCallBack( Tick, this ));
 	}
@@ -227,10 +560,35 @@ public:
 		delete iLines;
 	}
 	void Refresh();
-	void HidEvent( const THIDEvent &aEv );
 
 private:
 	static TInt Tick( TAny *aPtr ) { static_cast<CMgrAppUi *>( aPtr )->Refresh(); return 1; }
+
+	void DynInitMenuPaneL( TInt aResourceId, CEikMenuPane *aMenuPane )
+	{
+		if( aResourceId == R_MGR_MENU )
+		{
+			aMenuPane->SetItemTextL( EBtHidCmdSearch, Txt( ETxtMenuFind ));
+			aMenuPane->SetItemTextL( EBtHidCmdTests, Txt( ETxtMenuTests ));
+			aMenuPane->SetItemTextL( EBtHidCmdForget, Txt( ETxtMenuForget ));
+			aMenuPane->SetItemTextL( EAknCmdExit, Txt( ETxtMenuExit ));
+		}
+		else if( aResourceId == R_MGR_TESTS_MENU )
+		{
+			aMenuPane->SetItemTextL( EBtHidCmdTestMouse, Txt( ETxtMenuTestMouse ));
+			aMenuPane->SetItemTextL( EBtHidCmdTestKeys, Txt( ETxtMenuTestKeys ));
+		}
+	}
+
+	/* en las pruebas la tecla derecha es "Atras" y termina la prueba */
+	void SetMode( TMgrMode aMode )
+	{
+		iView->SetMode( aMode );
+		TRAP_IGNORE( Cba()->SetCommandSetL( aMode == EModeStatus ? R_AVKON_SOFTKEYS_OPTIONS_EXIT : R_AVKON_SOFTKEYS_BACK ));
+		Cba()->DrawNow();
+		if( aMode == EModeStatus )
+			Refresh();
+	}
 
 	void HandleCommandL( TInt aCommand )
 	{
@@ -240,10 +598,19 @@ private:
 			if( iConnectErr == KErrNone )
 				iSearch->Start();
 			break;
+		case EBtHidCmdTestMouse:
+			SetMode( EModeMouse );
+			break;
+		case EBtHidCmdTestKeys:
+			SetMode( EModeKeys );
+			break;
 		case EBtHidCmdForget:
 			if( iConnectErr == KErrNone )
 				iMgr.ForgetAll();
 			Refresh();
+			break;
+		case EAknSoftkeyBack:
+			SetMode( EModeStatus );
 			break;
 		case EAknSoftkeyExit:
 		case EAknCmdExit:
@@ -265,52 +632,9 @@ private:
 	CMgrView      *iView;
 	CDesCArray    *iLines;
 	CSearch       *iSearch;
-	CPeriodic     *iTimer;
 	CEvents       *iEvents;
-	TMgrTest       iTest;
+	CPeriodic     *iTimer;
 };
-
-void CEvents::RunL()
-{
-	THIDEvent ev;
-	if( iStatus.Int() != KErrNone )
-		return; // el servidor se cerro
-	iClient->GetEvent( ev );
-	iUi.HidEvent( ev );
-	iClient->EventReady( &iStatus );
-	SetActive();
-}
-
-void CMgrAppUi::HidEvent( const THIDEvent &aEv )
-{
-	iTest.iEvents++;
-	if( aEv.Type() == THIDEvent::EMouseEvent )
-	{
-		TMouseEvent *m = aEv.Mouse();
-		TInt bit = m->iValue == EMouseButtonRight ? 2 : m->iValue == EMouseButtonMiddle ? 4 : 1;
-		TRect area = iView->TestRect();
-		switch( m->iType )
-		{
-		case EEventRelativeXY:
-			iTest.iPos += m->iPosition;
-			if( iTest.iPos.iX < area.iTl.iX ) iTest.iPos.iX = area.iTl.iX;
-			if( iTest.iPos.iY < area.iTl.iY ) iTest.iPos.iY = area.iTl.iY;
-			if( iTest.iPos.iX > area.iBr.iX ) iTest.iPos.iX = area.iBr.iX;
-			if( iTest.iPos.iY > area.iBr.iY ) iTest.iPos.iY = area.iBr.iY;
-			break;
-		case EEventButtonDown: iTest.iButtons |= bit; break;
-		case EEventButtonUp:   iTest.iButtons &= ~bit; break;
-		case EEventRelativeWheel: iTest.iWheel += m->iValue; break;
-		default: break;
-		}
-	}
-	else if( aEv.Type() == THIDEvent::EKeyEvent )
-	{
-		iTest.iKey = aEv.Key()->ScanCode();
-		iTest.iKeyDown = aEv.Key()->Type() == EEventHIDKeyDown;
-	}
-	iView->DrawDeferred();
-}
 
 void CSearch::RunL()
 {
@@ -328,55 +652,55 @@ void CMgrAppUi::Refresh()
 	AddLine( _L( "Bluetooth HID" ));
 	if( iConnectErr != KErrNone )
 	{
-		line.Format( _L( "No arranca el servidor (%d)" ), iConnectErr );
+		line.Format( Txt( ETxtNoServer ), iConnectErr );
 		AddLine( line );
 		iView->SetLines( iLines );
 		return;
 	}
 	if( iMgr.Status( st ) != KErrNone )
 	{
-		AddLine( _L( "El servidor no responde" ));
+		AddLine( Txt( ETxtServerDead ));
 		iView->SetLines( iLines );
 		return;
 	}
 
 	if( !st().iCount )
 	{
-		AddLine( _L( "Sin dispositivos." ));
-		AddLine( _L( "Opciones > Buscar dispositivo" ));
+		AddLine( Txt( ETxtNoDevices ));
+		AddLine( Txt( ETxtFindHint ));
 	}
 	for( i = 0; i < st().iCount; i++ )
 	{
 		const TBtHidDeviceInfo &d = st().iDevice[i];
 		TBuf<32> name;
+		TPtrC    kind = Txt( d.iType == EBtHidKeyboard ? ETxtKeyboard : ETxtMouse );
 		name.Copy( d.iName );
 		if( !name.Length())
 			name.Format( _L( "%02x:%02x:%02x:%02x:%02x:%02x" ), d.iAddr[0], d.iAddr[1], d.iAddr[2], d.iAddr[3], d.iAddr[4], d.iAddr[5] );
-		_LIT( KKeyboard, "Teclado" );
-		_LIT( KMouse, "Mouse" );
-		const TDesC &kind = d.iType == EBtHidKeyboard ? (const TDesC &)KKeyboard : (const TDesC &)KMouse;
 		line.Format( _L( "%S: %S" ), &kind, &name );
 		AddLine( line );
 		if( d.iState == EBtHidConnected )
-			line = _L( "   conectado" );
+			AddLine( Txt( ETxtConnected ));
 		else if( d.iState == EBtHidConnecting )
-			line = _L( "   conectando..." );
+			AddLine( Txt( ETxtConnecting ));
 		else
-			line.Format( _L( "   sin conexion (%d), reintentando" ), d.iError );
-		AddLine( line );
+		{
+			line.Format( Txt( ETxtNotConnected ), d.iError );
+			AddLine( line );
+		}
 	}
-	line.Format( _L( "Apps usandolo: %d" ), st().iClients );
+	line.Format( Txt( ETxtApps ), st().iClients );
 	AddLine( line );
 	if( iSearch->LastError() != KErrNone && iSearch->LastError() != KErrCancel )
 	{
-		line.Format( _L( "La busqueda fallo (%d)" ), iSearch->LastError());
+		line.Format( Txt( ETxtSearchFailed ), iSearch->LastError());
 		AddLine( line );
 	}
 	for( i = 0; i < st().iCount; i++ )
 		if( st().iDevice[i].iState != EBtHidConnected )
 		{
-			AddLine( _L( "Si no conecta: mouse en modo" ));
-			AddLine( _L( "emparejar y Buscar de nuevo" ));
+			AddLine( Txt( ETxtHint1 ));
+			AddLine( Txt( ETxtHint2 ));
 			break;
 		}
 	iView->SetLines( iLines );

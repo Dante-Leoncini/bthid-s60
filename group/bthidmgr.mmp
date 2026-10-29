@@ -30,4 +30,6 @@ LIBRARY         avkon.lib
 LIBRARY         ws32.lib
 LIBRARY         gdi.lib
 LIBRARY         bafl.lib
+LIBRARY         fbscli.lib
+LIBRARY         eikcoctl.lib
 LIBRARY         bthidhost.lib

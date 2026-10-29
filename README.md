@@ -18,6 +18,9 @@ directo al dispositivo, lee los reportes tal cual vienen y manda apretado al apr
   dispositivos.
 - `bthidmgr.exe`: la app "Bluetooth HID" del menu. *Opciones > Buscar dispositivo* abre el cuadro de
   Bluetooth del telefono; el elegido queda guardado y se reconecta solo. Hasta un mouse y un teclado a la vez.
+  *Opciones > Pruebas* tiene una prueba de mouse (arrastrar un cuadrado con cualquiera de los tres botones, la
+  rueda le cambia el tamano) y una de teclado (teclas apretadas, modificadores y lo que se escribe). La app
+  esta en ingles y en castellano, segun el idioma del telefono.
 
 Si el driver de Hinkka tiene el mouse conectado, este no lo puede tomar: desconectarlo ahi primero. Los dos
 paquetes pueden estar instalados a la vez.

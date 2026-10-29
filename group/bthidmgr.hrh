@@ -4,7 +4,10 @@
 enum TBtHidMgrCommands
 {
 	EBtHidCmdSearch = 0x6000,
-	EBtHidCmdForget
+	EBtHidCmdForget,
+	EBtHidCmdTests,
+	EBtHidCmdTestMouse,
+	EBtHidCmdTestKeys
 };
 
 #endif
