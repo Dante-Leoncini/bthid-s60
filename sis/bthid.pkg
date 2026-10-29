@@ -1,7 +1,9 @@
 ; Bluetooth HID: servidor de mouse y teclado Bluetooth + DLL con la API del hidsrv de Hinkka + app para elegir dispositivos
 &EN
 
-#{"Bluetooth HID"},(0xe0d69652),1,0,0
+; con el UID de paquete del "Bluetooth HID support" de Hinkka (y una version mas alta): se instala como su
+; actualizacion y lo reemplaza. Su hidsrv.dll queda reemplazado por el nuestro, asi las apps viejas siguen andando
+#{"Bluetooth HID"},(0xa00054c4),2,0,0
 
 [0x101F7961], 0, 0, 0, {"S60ProductID"} ; S60v3
 [0x1028315F], 0, 0, 0, {"S60ProductID"} ; ^1
@@ -12,6 +14,7 @@
 
 "$(EPOCROOT)epoc32\release\$(PLATFORM)\$(TARGET)\bthidhostsrv.exe" - "!:\sys\bin\bthidhostsrv.exe"
 "$(EPOCROOT)epoc32\release\$(PLATFORM)\$(TARGET)\bthidhost.dll"    - "!:\sys\bin\bthidhost.dll"
+"$(EPOCROOT)epoc32\release\$(PLATFORM)\$(TARGET)\hidsrv.dll"       - "!:\sys\bin\hidsrv.dll"
 "$(EPOCROOT)epoc32\release\$(PLATFORM)\$(TARGET)\bthidmgr.exe"     - "!:\sys\bin\bthidmgr.exe"
 "$(EPOCROOT)epoc32\data\z\resource\apps\bthidmgr.rsc" - "!:\resource\apps\bthidmgr.rsc"
 "$(EPOCROOT)epoc32\data\z\private\10003a3f\import\apps\bthidmgr_reg.rsc" - "!:\private\10003a3f\import\apps\bthidmgr_reg.rsc"

@@ -1,0 +1,16 @@
+// hidsrv.dll compatible con el de Hinkka: mismo nombre, mismo UID (0xA00054C3) y GetHIDClientAPI en el ordinal 1,
+// pero contra nuestro servidor. Las apps viejas que usaban el de Hinkka andan sin cambios
+TARGET          hidsrv.dll
+TARGETTYPE      dll
+UID             0x1000008d 0xa00054c3
+VENDORID        0
+CAPABILITY      LocalServices Location NetworkServices ReadUserData UserEnvironment WriteUserData
+MACRO           BTHID_HINKKA_COMPAT
+
+USERINCLUDE     ../inc ../src
+SYSTEMINCLUDE   /epoc32/include /epoc32/include/app /epoc32/include/mw /epoc32/include/platform /epoc32/include/platform/mw
+
+SOURCEPATH      ../src
+SOURCE          client.cpp
+
+LIBRARY         euser.lib

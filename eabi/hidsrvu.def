@@ -1,0 +1,4 @@
+EXPORTS
+	_Z15GetHIDClientAPIv @ 1 NONAME
+	_Z14HidSrvReservedv @ 2 NONAME
+

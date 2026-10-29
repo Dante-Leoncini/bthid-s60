@@ -9,4 +9,5 @@ PRJ_EXPORTS
 PRJ_MMPFILES
 bthidhostsrv.mmp
 bthidhost.mmp
+hidsrv.mmp
 bthidmgr.mmp

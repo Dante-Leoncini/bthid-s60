@@ -3,6 +3,9 @@ client.cpp - bthidhost.dll: la misma API que el hidsrv.dll de Hinkka (bthidclien
 
 Ordinal 1 = GetHIDClientAPI, como en el de Hinkka: las apps que hacen RLibrary::Load + Lookup( 1 ) solo
 cambian el nombre de la DLL. La diferencia es que los botones del mouse llegan apretados y soltados de verdad.
+
+Con BTHID_HINKKA_COMPAT se compila como hidsrv.dll, con el UID del de Hinkka: las apps viejas (ScummVM,
+Quake 3...) lo cargan sin cambiar nada y usan nuestro servidor.
 */
 
 #include <e32base.h>
@@ -95,6 +98,15 @@ EXPORT_C MHIDSrvClient *GetHIDClientAPI()
 	return new CBtHidClient;
 }
 
+#ifdef BTHID_HINKKA_COMPAT
+/* el hidsrv.dll de Hinkka exporta dos funciones; la 2 no esta en su header y ninguna app la usa: la dejamos para
+   que los numeros de orden sean los mismos */
+EXPORT_C TInt HidSrvReserved()
+{
+	return KErrNotSupported;
+}
+#else
+
 /* ------------------------------------------------------------------ */
 
 class RBtHidManagerSession : public RBtHidManager
@@ -127,3 +139,5 @@ EXPORT_C TInt RBtHidManager::Status( TBtHidStatusPckg &aStatus )
 {
 	return SendReceive( EBtHidStatus, TIpcArgs( &aStatus ));
 }
+
+#endif // BTHID_HINKKA_COMPAT
