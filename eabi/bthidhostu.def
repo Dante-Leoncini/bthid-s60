@@ -1,0 +1,8 @@
+EXPORTS
+	_Z15GetHIDClientAPIv @ 1 NONAME
+	_ZN13RBtHidManager7ConnectEv @ 2 NONAME
+	_ZN13RBtHidManager6SearchER14TRequestStatus @ 3 NONAME
+	_ZN13RBtHidManager12CancelSearchEv @ 4 NONAME
+	_ZN13RBtHidManager9ForgetAllEv @ 5 NONAME
+	_ZN13RBtHidManager6StatusER8TPckgBufI12TBtHidStatusE @ 6 NONAME
+

@@ -1,0 +1,10 @@
+#ifndef BTHIDMGR_HRH
+#define BTHIDMGR_HRH
+
+enum TBtHidMgrCommands
+{
+	EBtHidCmdSearch = 0x6000,
+	EBtHidCmdForget
+};
+
+#endif

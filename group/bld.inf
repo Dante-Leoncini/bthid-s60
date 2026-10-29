@@ -1,0 +1,12 @@
+PRJ_PLATFORMS
+DEFAULT ARMV5
+
+PRJ_EXPORTS
+../inc/bthidclient.h   bthidhost/bthidclient.h
+../inc/bthidevent.h    bthidhost/bthidevent.h
+../inc/bthidmanager.h  bthidhost/bthidmanager.h
+
+PRJ_MMPFILES
+bthidhostsrv.mmp
+bthidhost.mmp
+bthidmgr.mmp

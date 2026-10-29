@@ -1,0 +1,16 @@
+#include <appinfo.rh>
+#include <bthidmgr.rsg>
+
+UID2 KUidAppRegistrationResourceFile
+UID3 0xe0d69652
+
+RESOURCE APP_REGISTRATION_INFO
+{
+	app_file="bthidmgr";
+
+	localisable_resource_file="\\resource\\apps\\bthidmgr";
+	localisable_resource_id=R_MGR_LOCALISABLE_APP_INFO;
+
+	embeddability=KAppNotEmbeddable;
+	newfile=KAppDoesNotSupportNewFile;
+}

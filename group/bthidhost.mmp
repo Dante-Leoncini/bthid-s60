@@ -1,0 +1,16 @@
+// DLL cliente: la misma API que el hidsrv.dll de Hinkka (ordinal 1 = GetHIDClientAPI) mas RBtHidManager.
+// Las capacidades son todas las que puede autofirmar el usuario: una DLL tiene que tener por lo menos las de
+// cualquier app que la cargue
+TARGET          bthidhost.dll
+TARGETTYPE      dll
+UID             0x1000008d 0xe0d69651
+VENDORID        0
+CAPABILITY      LocalServices Location NetworkServices ReadUserData UserEnvironment WriteUserData
+
+USERINCLUDE     ../inc ../src
+SYSTEMINCLUDE   /epoc32/include /epoc32/include/app /epoc32/include/mw /epoc32/include/platform /epoc32/include/platform/mw
+
+SOURCEPATH      ../src
+SOURCE          client.cpp
+
+LIBRARY         euser.lib

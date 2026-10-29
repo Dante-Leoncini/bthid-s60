@@ -1,0 +1,23 @@
+// servidor: se queda con las conexiones Bluetooth del mouse y el teclado (sin interfaz)
+TARGET          bthidhostsrv.exe
+TARGETTYPE      exe
+UID             0 0xe0d69650
+VENDORID        0
+CAPABILITY      LocalServices
+
+EPOCSTACKSIZE   0x5000
+EPOCHEAPSIZE    0x1000 0x100000
+
+USERINCLUDE     ../inc ../src
+SYSTEMINCLUDE   /epoc32/include /epoc32/include/app /epoc32/include/mw /epoc32/include/platform /epoc32/include/platform/mw
+
+SOURCEPATH      ../src
+SOURCE          server.cpp
+SOURCE          bthid_host.cpp
+
+LIBRARY         euser.lib
+LIBRARY         efsrv.lib
+LIBRARY         esock.lib
+LIBRARY         bluetooth.lib
+LIBRARY         btextnotifiers.lib
+LIBRARY         btdevice.lib

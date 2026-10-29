@@ -1,0 +1,44 @@
+NAME	BHID
+
+#include <eikon.rh>
+#include <avkon.rsg>
+#include <avkon.rh>
+#include <appinfo.rh>
+#include "bthidmgr.hrh"
+
+RESOURCE RSS_SIGNATURE { }
+RESOURCE TBUF { buf="BHID"; }
+
+RESOURCE EIK_APP_INFO
+{
+	menubar = r_mgr_menubar;
+	cba = R_AVKON_SOFTKEYS_OPTIONS_EXIT;
+}
+
+RESOURCE MENU_BAR r_mgr_menubar
+{
+	titles = { MENU_TITLE { menu_pane = r_mgr_menu; } };
+}
+
+RESOURCE MENU_PANE r_mgr_menu
+{
+	items =
+	{
+		MENU_ITEM { command = EBtHidCmdSearch; txt = "Buscar dispositivo"; },
+		MENU_ITEM { command = EBtHidCmdForget; txt = "Olvidar todos"; },
+		MENU_ITEM { command = EAknCmdExit;     txt = "Salir"; }
+	};
+}
+
+rls_string STRING_app_caption_string "Bluetooth HID"
+rls_string STRING_app_short_caption_string "BT HID"
+
+RESOURCE LOCALISABLE_APP_INFO r_mgr_localisable_app_info
+{
+	short_caption = STRING_app_short_caption_string;
+	caption_and_icon = CAPTION_AND_ICON_INFO
+	{
+		caption = STRING_app_caption_string;
+		number_of_icons = 0;
+	};
+}
