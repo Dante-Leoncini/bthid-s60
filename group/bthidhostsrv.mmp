@@ -14,6 +14,7 @@ SYSTEMINCLUDE   /epoc32/include /epoc32/include/app /epoc32/include/mw /epoc32/i
 SOURCEPATH      ../src
 SOURCE          server.cpp
 SOURCE          bthid_host.cpp
+SOURCE          hidparse.cpp
 
 LIBRARY         euser.lib
 LIBRARY         efsrv.lib
@@ -21,3 +22,5 @@ LIBRARY         esock.lib
 LIBRARY         bluetooth.lib
 LIBRARY         btextnotifiers.lib
 LIBRARY         btdevice.lib
+LIBRARY         sdpagent.lib
+LIBRARY         sdpdatabase.lib

@@ -54,6 +54,9 @@ public:
 	// conexion entrante (CBtHidListener) en el canal aPsm: la adopta el dispositivo elegido con esa direccion
 	void Incoming( TUint aPsm, RSocket &aSock, const TBTDevAddr &aAddr );
 
+	// guardar los dispositivos (y sus descriptores HID) para la proxima vez
+	void Save();
+
 	RSocketServ &SocketServ() { return iSs; }
 	MBtHidObserver &Observer() { return iObserver; }
 
@@ -62,9 +65,8 @@ private:
 	void ConstructL( const TDesC &aSaveFile );
 	void RunL();
 	void DoCancel();
-	void AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName );
+	void AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc );
 	void Load();
-	void Save();
 
 	MBtHidObserver               &iObserver;
 	RSocketServ                   iSs;
