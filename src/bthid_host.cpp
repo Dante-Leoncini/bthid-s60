@@ -28,7 +28,16 @@ const TUint  KHidIntrPsm      = 0x13;
 const TUint8 KHidpSetProtoBoot = 0x70; // HIDP SET_PROTOCOL, parametro 0 = boot
 const TUint8 KHidpSetProtoReport = 0x71; // parametro 1 = reportes (los del descriptor)
 const TUint  KHidServiceUuid  = 0x1124;  // servicio HID en el SDP
+const TUint  KHidReconnAttr   = 0x0205;  // HIDReconnectInitiate: el dispositivo se reconecta solo
 const TUint  KHidDescListAttr = 0x0206;  // atributo HIDDescriptorList
+const TUint  KHidNormConnAttr = 0x020D;  // HIDNormallyConnectable: contesta si lo llama el telefono
+
+enum // iFlags del dispositivo (se guardan con el)
+{
+	EFlagSdpKnown    = 1,  // ya leimos estos atributos
+	EFlagReconnSelf  = 2,  // HIDReconnectInitiate
+	EFlagNormConnect = 4   // HIDNormallyConnectable
+};
 const TInt   KMaxHidDesc      = 512;
 const TUint8 KHidpDataInput   = 0xA1;  // HIDP DATA, reporte de entrada
 const TInt   KRetryFirstUs    = 3000000;
@@ -49,6 +58,7 @@ public:
 	{
 		delete iAgent;
 		delete iPattern;
+		delete iAttrs;
 	}
 	void StartL( const TBTDevAddr &aAddr )
 	{
@@ -67,14 +77,19 @@ private:
 			Finish( aError != KErrNone ? aError : KErrNotFound );
 			return;
 		}
-		TRAPD( err, iAgent->AttributeRequestL( aHandle, KHidDescListAttr ));
+		TRAPD( err,
+			iAttrs = CSdpAttrIdMatchList::NewL();
+			iAttrs->AddL( TAttrRange( KHidReconnAttr, KHidDescListAttr ));
+			iAttrs->AddL( TAttrRange( KHidNormConnAttr ));
+			iAgent->AttributeRequestL( aHandle, *iAttrs ));
 		if( err != KErrNone )
 			Finish( err );
 	}
-	void AttributeRequestResult( TSdpServRecordHandle, TSdpAttributeID, CSdpAttrValue *aValue )
+	void AttributeRequestResult( TSdpServRecordHandle, TSdpAttributeID aAttrID, CSdpAttrValue *aValue )
 	{
 		if( !aValue )
 			return;
+		iAttr = aAttrID;
 		TRAP_IGNORE( aValue->AcceptVisitorL( *this ));
 		delete aValue;
 	}
@@ -85,8 +100,12 @@ private:
 	// HIDDescriptorList = DES { DES { tipo (0x22 = reportes), descriptor } }: el descriptor es el string
 	void VisitAttributeValueL( CSdpAttrValue &aValue, TSdpElementType aType )
 	{
-		if( aType == ETypeString && !iDesc.Length())
+		if( iAttr == KHidDescListAttr && aType == ETypeString && !iDesc.Length())
 			iDesc.Copy( aValue.Des().Left( iDesc.MaxLength()));
+		else if( iAttr == KHidReconnAttr && aType == ETypeBoolean )
+			iFlags |= aValue.Bool() ? EFlagReconnSelf : 0;
+		else if( iAttr == KHidNormConnAttr && aType == ETypeBoolean )
+			iFlags |= aValue.Bool() ? EFlagNormConnect : 0;
 	}
 	void StartListL( CSdpAttrValueList & ) {}
 	void EndListL() {}
@@ -95,14 +114,19 @@ private:
 	CBtHidDevice       &iDev;
 	CSdpAgent          *iAgent;
 	CSdpSearchPattern  *iPattern;
+	CSdpAttrIdMatchList *iAttrs;
+	TSdpAttributeID     iAttr;
 	TBuf8<KMaxHidDesc>  iDesc;
+	TInt                iFlags;
 	TBool               iDone;
 };
 
 class CBtHidDevice : public CActive
 {
 public:
-	CBtHidDevice( CBtHidHost &aHost, const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc );
+	CBtHidDevice( CBtHidHost &aHost, const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc, TInt aFlags );
+	// sin llamarlo: esperar a que se conecte el (si se reconecta solo); si no, llamarlo como siempre
+	void Wait();
 	~CBtHidDevice();
 	void Start();
 	void StartAfter( TInt aMicroSeconds );
@@ -111,13 +135,15 @@ public:
 	const TBTDevAddr &Addr() const { return iAddr; }
 	TInt Type() const { return iType; }
 	const TDesC8 &Name() const { return iName; }
-	TInt State() const { return iConnected ? EBtHidConnected : iState == EWaitRetry ? EBtHidDisconnected : EBtHidConnecting; }
+	TInt State() const { return iConnected ? EBtHidConnected : iState == EWaitDevice ? EBtHidWaiting
+		: iState == EWaitRetry ? EBtHidDisconnected : EBtHidConnecting; }
+	TInt Flags() const { return iFlags; }
 	TInt Error() const { return iError; }
 	const TDesC8 &Descriptor() const { return iDesc; }
-	void DescriptorDone( TInt aError, const TDesC8 &aDesc );
+	void DescriptorDone( TInt aError, const TDesC8 &aDesc, TInt aFlags );
 
 private:
-	enum TState { EIdle, EConnCtrl, EConnIntr, ESetProto, EReading, EWaitRetry, EWaitIntr };
+	enum TState { EIdle, EConnCtrl, EConnIntr, ESetProto, EReading, EWaitRetry, EWaitIntr, EWaitDevice };
 
 	void RunL();
 	void DoCancel();
@@ -160,6 +186,8 @@ private:
 	CBtHidSdp  *iSdp;
 	TBool       iSdpTried;
 	TBool       iDescLogged;
+	TInt        iFlags;          // EFlag*: lo que dijo el SDP de como se reconecta
+	TInt        iOtherLogged;    // para el log: reportes que no son de movimiento
 	TInt        iLastBtnByte;    // para el log: cambios del byte de botones
 	TInt        iBtnLogged;
 };
@@ -169,11 +197,11 @@ void CBtHidSdp::Finish( TInt aError )
 	if( iDone )
 		return;
 	iDone = ETrue;
-	iDev.DescriptorDone( aError, iDesc ); // no nos borra aca: lo hace en la proxima conexion o al cerrar
+	iDev.DescriptorDone( aError, iDesc, iFlags | EFlagSdpKnown ); // no nos borra aca: lo hace en la proxima conexion
 }
 
-CBtHidDevice::CBtHidDevice( CBtHidHost &aHost, const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc )
-	: CActive( EPriorityStandard ), iHost( aHost ), iAddr( aAddr ), iType( aType ), iState( EIdle )
+CBtHidDevice::CBtHidDevice( CBtHidHost &aHost, const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc, TInt aFlags )
+	: CActive( EPriorityStandard ), iHost( aHost ), iAddr( aAddr ), iType( aType ), iState( EIdle ), iFlags( aFlags )
 {
 	iName.Copy( aName.Left( iName.MaxLength()));
 	iDesc.Copy( aDesc.Left( iDesc.MaxLength()));
@@ -259,6 +287,22 @@ void CBtHidDevice::Start()
 	ConnectChannel( iCtrl, KHidCtrlPsm );
 }
 
+/* los que se reconectan solos (HIDReconnectInitiate, casi todos los mouse): no llamarlos, esperarlos. Llamar
+   ocupa la radio ~5 s por intento y en ese rato la llamada del mouse no entra (era por lo que habia que apretar
+   "conectar" en el mouse) */
+void CBtHidDevice::Wait()
+{
+	if( !( iFlags & EFlagReconnSelf ))
+	{
+		StartAfter( 2000000 );
+		return;
+	}
+	Cancel();
+	CloseSockets();
+	iState = EWaitDevice; // nada pendiente: la conexion la trae CBtHidListener (AdoptCtrl / AdoptIntr)
+	Log( "esperando que se conecte", KErrNone );
+}
+
 /* primera conexion un poco despues: recien elegido en el cuadro, la radio todavia esta terminando la busqueda */
 void CBtHidDevice::StartAfter( TInt aMicroSeconds )
 {
@@ -301,6 +345,11 @@ void CBtHidDevice::Retry( TInt aErr )
 		Log( "desconectado", aErr );
 		iConnected = EFalse;
 		iFails = 0;
+	}
+	if( iFlags & EFlagReconnSelf )
+	{
+		iState = EWaitDevice; // se reconecta solo: esperarlo
+		return;
 	}
 	else if( iFails < 20 ) // cada intento (despues se calla, para no llenar el log con un mouse apagado)
 		Log( iState == EConnCtrl ? "fallo el canal de control" : iState == EConnIntr ? "fallo el canal de datos"
@@ -425,6 +474,8 @@ TInt CBtHidDevice::RunError( TInt aError )
 
 void CBtHidDevice::DoCancel()
 {
+	if( iState == EWaitDevice )
+		return; // nada pendiente
 	if( iState == EWaitRetry || iState == EWaitIntr )
 	{
 		iTimer.Cancel();
@@ -437,7 +488,7 @@ void CBtHidDevice::DoCancel()
 /* la primera vez que conecta: pedir el descriptor para saber el formato de sus reportes */
 void CBtHidDevice::StartSdp()
 {
-	if( iDesc.Length() || iSdp || iSdpTried )
+	if(( iDesc.Length() && ( iFlags & EFlagSdpKnown )) || iSdp || iSdpTried )
 		return;
 	iSdpTried = ETrue;
 	iSdp = new CBtHidSdp( *this );
@@ -448,16 +499,25 @@ void CBtHidDevice::StartSdp()
 		Log( "no se pudo pedir el descriptor HID", err );
 }
 
-void CBtHidDevice::DescriptorDone( TInt aError, const TDesC8 &aDesc )
+void CBtHidDevice::DescriptorDone( TInt aError, const TDesC8 &aDesc, TInt aFlags )
 {
+	TBuf8<80> msg;
+
 	if( aError != KErrNone || !aDesc.Length())
 	{
 		Log( "sin descriptor HID, queda el protocolo boot", aError );
 		return;
 	}
-	iDesc.Copy( aDesc.Left( iDesc.MaxLength()));
-	HidParseDescriptor( iDesc, iLayout );
-	LogLayout();
+	iFlags = aFlags;
+	msg.Format( _L8( "SDP: se reconecta solo %d, contesta si lo llaman %d" ),
+		( iFlags & EFlagReconnSelf ) != 0, ( iFlags & EFlagNormConnect ) != 0 );
+	iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+	if( !iDesc.Length())
+	{
+		iDesc.Copy( aDesc.Left( iDesc.MaxLength()));
+		HidParseDescriptor( iDesc, iLayout );
+		LogLayout();
+	}
 	iHost.Save(); // la proxima conexion ya usa los reportes del descriptor
 }
 
@@ -555,6 +615,16 @@ TBool CBtHidDevice::LayoutReport( const TDesC8 &aData )
 	if( iLayout.iX.iBits && iLayout.iX.iReportId == id ) { mouse = ETrue; dx = HidField( p, iLayout.iX ); }
 	if( iLayout.iY.iBits && iLayout.iY.iReportId == id ) { mouse = ETrue; dy = HidField( p, iLayout.iY ); }
 	if( iLayout.iWheel.iBits && iLayout.iWheel.iReportId == id ) { mouse = ETrue; wheel = HidField( p, iLayout.iWheel ); }
+	if( iOtherLogged < 30 && id != iLayout.iX.iReportId )
+	{
+		TBuf8<120> msg;
+		TInt i;
+		iOtherLogged++;
+		msg.Format( _L8( "reporte %d:" ), id );
+		for( i = 0; i < aData.Length() && i < 24; i++ )
+			msg.AppendFormat( _L8( " %02x" ), aData[i] );
+		iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+	}
 	// cada cambio del primer byte del reporte (los botones en casi todos los mouse) va al log, con el reporte
 	if( iBtnLogged < 30 && p.Length() && p[0] != iLastBtnByte )
 	{
@@ -785,7 +855,7 @@ TInt CBtHidHost::DeviceCount() const
 }
 
 /* un dispositivo por tipo: elegir otro mouse reemplaza al anterior */
-void CBtHidHost::AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc )
+void CBtHidHost::AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc, TInt aFlags, TBool aCall )
 {
 	TInt i, slot = -1;
 
@@ -801,9 +871,13 @@ void CBtHidHost::AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &a
 	}
 	if( slot < 0 )
 		return;
-	iDev[slot] = new CBtHidDevice( *this, aAddr, aType, aName, aDesc );
-	if( iDev[slot] )
-		iDev[slot]->StartAfter( 2000000 );
+	iDev[slot] = new CBtHidDevice( *this, aAddr, aType, aName, aDesc, aFlags );
+	if( !iDev[slot] )
+		return;
+	if( aCall )
+		iDev[slot]->StartAfter( 2000000 ); // recien elegido: esta en modo emparejar, hay que llamarlo
+	else
+		iDev[slot]->Wait();
 }
 
 void CBtHidHost::SelectDevice()
@@ -845,7 +919,7 @@ void CBtHidHost::RunL()
 	if( iResp().IsValidDeviceName())
 		name.Copy( iResp().DeviceName().Left( name.MaxLength()));
 	iObserver.BtHidLog( type == EBtHidKeyboard ? "teclado elegido" : type == EBtHidMouse ? "mouse elegido" : "dispositivo elegido" );
-	AddDevice( iResp().BDAddr(), type, name, KNullDesC8 );
+	AddDevice( iResp().BDAddr(), type, name, KNullDesC8, 0, ETrue );
 	Save();
 	iObserver.BtHidSearchDone( KErrNone );
 }
@@ -891,9 +965,9 @@ void CBtHidHost::ForgetAll()
 }
 
 /* archivo: un byte de version (KSaveVersion) y por dispositivo: 6 bytes de direccion, 1 de tipo, 1 de largo del
-   nombre, el nombre, 2 de largo del descriptor HID y el descriptor. (La version vieja no tenia el byte de version
-   ni el descriptor.) */
-const TUint8 KSaveVersion = 0xB3;
+   nombre, el nombre, 1 de flags (EFlag*), 2 de largo del descriptor HID y el descriptor. (La version sin byte
+   de version tampoco tenia flags ni descriptor.) */
+const TUint8 KSaveVersion = 0xB4; // 0xB3 no tenia el byte de flags (EFlag*) despues del nombre
 
 void CBtHidHost::Load()
 {
@@ -918,23 +992,27 @@ void CBtHidHost::Load()
 		return;
 
 	const TDesC8 &data = *buf;
-	TBool v3 = data.Length() && data[0] == KSaveVersion;
-	for( i = v3 ? 1 : 0; i + 8 <= data.Length(); )
+	TInt ver = !data.Length() ? 0 : data[0] == KSaveVersion ? 4 : data[0] == 0xB3 ? 3 : 2;
+	for( i = ver > 2 ? 1 : 0; i + 8 <= data.Length(); )
 	{
-		TInt len = data[i + 7], dlen = 0;
+		TInt len = data[i + 7], flags = 0, dlen = 0, pos;
 		if( i + 8 + len > data.Length())
 			break;
-		if( v3 )
+		pos = i + 8 + len;
+		if( ver == 4 )
+			flags = data[pos++];
+		if( ver > 2 )
 		{
-			if( i + 10 + len > data.Length())
+			if( pos + 2 > data.Length())
 				break;
-			dlen = data[i + 8 + len] | ( data[i + 9 + len] << 8 );
-			if( i + 10 + len + dlen > data.Length())
+			dlen = data[pos] | ( data[pos + 1] << 8 );
+			pos += 2;
+			if( pos + dlen > data.Length())
 				break;
 		}
 		AddDevice( TBTDevAddr( data.Mid( i, 6 )), data[i + 6], data.Mid( i + 8, len ),
-			v3 ? data.Mid( i + 10 + len, dlen ) : KNullDesC8());
-		i += 8 + len + ( v3 ? 2 + dlen : 0 );
+			dlen ? data.Mid( pos, dlen ) : KNullDesC8(), flags, EFalse );
+		i = pos + dlen;
 	}
 	delete buf;
 }
@@ -943,7 +1021,7 @@ void CBtHidHost::Save()
 {
 	RFs    fs;
 	RFile  f;
-	HBufC8 *buf = HBufC8::New( 1 + EMaxDevices * ( 10 + 32 + KMaxHidDesc ));
+	HBufC8 *buf = HBufC8::New( 1 + EMaxDevices * ( 11 + 32 + KMaxHidDesc ));
 	TInt   i;
 
 	if( !buf )
@@ -958,6 +1036,7 @@ void CBtHidHost::Save()
 		data.Append( (TUint8)iDev[i]->Type());
 		data.Append( (TUint8)iDev[i]->Name().Length());
 		data.Append( iDev[i]->Name());
+		data.Append( (TUint8)iDev[i]->Flags());
 		data.Append( (TUint8)( desc.Length() & 0xff ));
 		data.Append( (TUint8)( desc.Length() >> 8 ));
 		data.Append( desc );

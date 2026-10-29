@@ -9,7 +9,8 @@ Los juegos no necesitan esto: cargan bthidhost.dll y usan la API de siempre (bth
 #include <e32base.h>
 
 enum TBtHidDeviceType   { EBtHidUnknown = 0, EBtHidMouse = 1, EBtHidKeyboard = 2 };
-enum TBtHidDeviceState  { EBtHidDisconnected = 0, EBtHidConnecting = 1, EBtHidConnected = 2 };
+// EBtHidWaiting: el dispositivo se reconecta solo (HIDReconnectInitiate); el telefono no lo llama, lo espera
+enum TBtHidDeviceState  { EBtHidDisconnected = 0, EBtHidConnecting = 1, EBtHidConnected = 2, EBtHidWaiting = 3 };
 
 struct TBtHidDeviceInfo
 {

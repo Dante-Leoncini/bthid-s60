@@ -40,6 +40,7 @@ enum TTextId
 	ETxtApps, ETxtSearchFailed, ETxtHint1, ETxtHint2, ETxtNoServer, ETxtServerDead,
 	ETxtMenuFind, ETxtMenuTests, ETxtMenuTestMouse, ETxtMenuTestKeys, ETxtMenuForget, ETxtMenuExit,
 	ETxtMouseHelp1, ETxtMouseHelp2, ETxtMouseSize, ETxtKeysHelp, ETxtKeysHeld, ETxtDown, ETxtUp, ETxtNoEvents,
+	ETxtWaiting,
 	ETxtCount
 };
 
@@ -72,6 +73,7 @@ static const TText *const KTextEn[ETxtCount] =
 	_S( "down" ),
 	_S( "up" ),
 	_S( "no events (%d)" ),
+	_S( "   waiting: move it or click" ),
 };
 
 static const TText *const KTextEs[ETxtCount] =
@@ -103,6 +105,7 @@ static const TText *const KTextEs[ETxtCount] =
 	_S( "abajo" ),
 	_S( "arriba" ),
 	_S( "sin eventos (%d)" ),
+	_S( "   esperando: movelo o hac\x00e9 click" ),
 };
 
 static TBool gSpanish;
@@ -683,6 +686,8 @@ void CMgrAppUi::Refresh()
 			AddLine( Txt( ETxtConnected ));
 		else if( d.iState == EBtHidConnecting )
 			AddLine( Txt( ETxtConnecting ));
+		else if( d.iState == EBtHidWaiting )
+			AddLine( Txt( ETxtWaiting ));
 		else
 		{
 			line.Format( Txt( ETxtNotConnected ), d.iError );
@@ -697,7 +702,7 @@ void CMgrAppUi::Refresh()
 		AddLine( line );
 	}
 	for( i = 0; i < st().iCount; i++ )
-		if( st().iDevice[i].iState != EBtHidConnected )
+		if( st().iDevice[i].iState != EBtHidConnected && st().iDevice[i].iState != EBtHidWaiting )
 		{
 			AddLine( Txt( ETxtHint1 ));
 			AddLine( Txt( ETxtHint2 ));

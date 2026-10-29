@@ -65,7 +65,7 @@ private:
 	void ConstructL( const TDesC &aSaveFile );
 	void RunL();
 	void DoCancel();
-	void AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc );
+	void AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc, TInt aFlags, TBool aCall );
 	void Load();
 
 	MBtHidObserver               &iObserver;
