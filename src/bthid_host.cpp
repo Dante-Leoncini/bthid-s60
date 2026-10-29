@@ -29,6 +29,7 @@ public:
 	CBtHidDevice( CBtHidHost &aHost, const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName );
 	~CBtHidDevice();
 	void Start();
+	void StartAfter( TInt aMicroSeconds );
 	void AdoptCtrl( RSocket &aSock );
 	void AdoptIntr( RSocket &aSock );
 	const TBTDevAddr &Addr() const { return iAddr; }
@@ -152,13 +153,29 @@ void CBtHidDevice::Start()
 	ConnectChannel( iCtrl, KHidCtrlPsm );
 }
 
+/* primera conexion un poco despues: recien elegido en el cuadro, la radio todavia esta terminando la busqueda */
+void CBtHidDevice::StartAfter( TInt aMicroSeconds )
+{
+	Cancel();
+	iState = EWaitRetry;
+	if( !iTimerOpen )
+	{
+		Start();
+		return;
+	}
+	iTimer.After( iStatus, aMicroSeconds );
+	SetActive();
+}
+
 void CBtHidDevice::ConnectChannel( RSocket &aSock, TUint aPsm )
 {
 	TBTSockAddr         addr;
 	TBTServiceSecurity  sec;
 
-	sec.SetAuthentication( ETrue ); // si no esta emparejado, el telefono pide el codigo (los mouse: 0000)
-	sec.SetEncryption( ETrue );     // los teclados lo exigen
+	// los teclados exigen cifrado (y emparejar con codigo). A los mouse no les pedimos nada: muchos no usan
+	// seguridad y cortaban la conexion; si el mouse la quiere, la pide el y el telefono empareja igual
+	sec.SetAuthentication( iType == EBtHidKeyboard );
+	sec.SetEncryption( iType == EBtHidKeyboard );
 	sec.SetAuthorisation( EFalse );
 	addr.SetBTAddr( iAddr );
 	addr.SetPort( aPsm );
@@ -381,8 +398,8 @@ public:
 		{
 			iListenOpen = ETrue;
 			sec.SetUid( TUid::Uid( 0xE0D69650 ));
-			sec.SetAuthentication( ETrue );
-			sec.SetEncryption( ETrue );
+			sec.SetAuthentication( EFalse ); // el dispositivo la pide si la quiere (los teclados si)
+			sec.SetEncryption( EFalse );
 			sec.SetAuthorisation( EFalse );
 			addr.SetPort( iPsm );
 			addr.SetSecurity( sec );
@@ -522,7 +539,7 @@ void CBtHidHost::AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &a
 		return;
 	iDev[slot] = new CBtHidDevice( *this, aAddr, aType, aName );
 	if( iDev[slot] )
-		iDev[slot]->Start();
+		iDev[slot]->StartAfter( 2000000 );
 }
 
 void CBtHidHost::SelectDevice()

@@ -60,7 +60,7 @@ private:
 	void Draw( const TRect & ) const
 	{
 		CWindowGc &gc = SystemGc();
-		const CFont *font = CEikonEnv::Static()->NormalFont();
+		const CFont *font = CEikonEnv::Static()->DenseFont();
 		TInt y, i;
 
 		gc.SetBrushStyle( CGraphicsContext::ESolidBrush );
@@ -68,11 +68,11 @@ private:
 		gc.Clear( Rect());
 		gc.UseFont( font );
 		gc.SetPenColor( KRgbBlack );
-		y = font->AscentInPixels() + 6;
+		y = font->AscentInPixels() + 3;
 		for( i = 0; iLines && i < iLines->Count(); i++ )
 		{
 			gc.DrawText( ( *iLines )[i], TPoint( 6, y ));
-			y += font->HeightInPixels() + 4;
+			y += font->HeightInPixels() + 1;
 		}
 		if( iTest )
 			DrawTest( gc, font );
