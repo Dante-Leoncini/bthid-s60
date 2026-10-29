@@ -147,6 +147,8 @@ void CBtHidDevice::Start()
 		return;
 	}
 	iState = EConnCtrl;
+	if( iFails < 20 )
+		Log( "llamando al dispositivo", iFails );
 	ConnectChannel( iCtrl, KHidCtrlPsm );
 }
 
@@ -175,8 +177,9 @@ void CBtHidDevice::Retry( TInt aErr )
 		Log( "desconectado", aErr );
 		iConnected = EFalse;
 	}
-	else if( iFails == 0 )
-		Log( "no se pudo conectar, reintentando", aErr );
+	else if( iFails < 20 ) // cada intento (despues se calla, para no llenar el log con un mouse apagado)
+		Log( iState == EConnCtrl ? "fallo el canal de control" : iState == EConnIntr ? "fallo el canal de datos"
+			: iState == EWaitIntr ? "llego el control pero no los datos" : "fallo la conexion", aErr );
 	iFails++;
 	iState = EWaitRetry;
 	if( !iTimerOpen )
@@ -239,6 +242,7 @@ void CBtHidDevice::SetProtocol()
 /* conexion entrante del dispositivo (CBtHidListener): primero llega el canal de control y despues el de datos */
 void CBtHidDevice::AdoptCtrl( RSocket &aSock )
 {
+	Log( "llamo: canal de control", KErrNone );
 	Cancel();
 	ReleaseAll();
 	CloseSockets();
@@ -253,6 +257,7 @@ void CBtHidDevice::AdoptCtrl( RSocket &aSock )
 
 void CBtHidDevice::AdoptIntr( RSocket &aSock )
 {
+	Log( "llamo: canal de datos", KErrNone );
 	if( iState != EWaitIntr ) // datos sin control: raro, pero lo usamos igual
 	{
 		Cancel();
@@ -392,6 +397,8 @@ public:
 			iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
 			return;
 		}
+		msg.Format( _L8( "escuchando el canal 0x%x" ), iPsm );
+		iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
 		Accept();
 	}
 
@@ -407,6 +414,12 @@ private:
 	}
 	void RunL()
 	{
+		if( iStatus.Int() != KErrNone )
+		{
+			TBuf8<48> msg;
+			msg.Format( _L8( "error esperando llamadas en 0x%x (%d)" ), iPsm, iStatus.Int());
+			iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+		}
 		if( iStatus.Int() == KErrNone )
 		{
 			TBTSockAddr remote;

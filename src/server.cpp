@@ -190,6 +190,7 @@ void CBtHidServer::ConstructL()
 	TFileName file;
 
 	StartL( KBtHidServerName );
+	BtHidLog( "servidor arrancado" );
 	iShutdown = CPeriodic::NewL( EPriorityIdle );
 
 	// los dispositivos elegidos se guardan en la carpeta privada del servidor (c:\private\e0d69650)
@@ -288,6 +289,9 @@ void CBtHidServer::CancelSearch( CBtHidSession *aSession )
 
 void CBtHidServer::BtHidSearchDone( TInt aError )
 {
+	TBuf8<32> msg;
+	msg.Format( _L8( "busqueda terminada (%d)" ), aError );
+	BtHidLog( (const char *)msg.PtrZ());
 	iSearchSession = NULL;
 	if( !iSearchMsg.IsNull())
 		iSearchMsg.Complete( aError );
