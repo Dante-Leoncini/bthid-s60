@@ -33,6 +33,7 @@ public:
 };
 
 class CBtHidDevice;
+class CBtHidListener;
 
 class CBtHidHost : public CActive
 {
@@ -49,6 +50,9 @@ public:
 	void CancelSelect();
 	void ForgetAll();
 	void GetStatus( TBtHidStatus &aStatus ) const;
+
+	// conexion entrante (CBtHidListener) en el canal aPsm: la adopta el dispositivo elegido con esa direccion
+	void Incoming( TUint aPsm, RSocket &aSock, const TBTDevAddr &aAddr );
 
 	RSocketServ &SocketServ() { return iSs; }
 	MBtHidObserver &Observer() { return iObserver; }
@@ -69,6 +73,7 @@ private:
 	TBTDeviceSelectionParamsPckg  iSel;
 	TBTDeviceResponseParamsPckg   iResp;
 	CBtHidDevice                 *iDev[EMaxDevices];
+	CBtHidListener               *iListenCtrl, *iListenIntr;
 	TFileName                     iFile;
 };
 

@@ -5,7 +5,9 @@ Por dispositivo: conectar el canal de control (PSM 0x11) y el de datos (0x13), p
 (SET_PROTOCOL) y leer reportes del canal de datos. En boot los reportes tienen formato fijo:
   mouse:   A1 botones dx dy [rueda ...]
   teclado: A1 modificadores 00 tecla1..tecla6
-Si se corta (el mouse se duerme, se apaga, queda lejos) se reintenta cada pocos segundos.
+Si se corta (el mouse se duerme, se apaga, queda lejos) se reintenta cada pocos segundos. Ademas escuchamos
+en los dos canales: la mayoria de los mouse no aceptan que el telefono los llame, son ellos los que llaman al
+despertarse (HIDNormallyConnectable = no), y esa conexion entrante la adopta el dispositivo guardado.
 */
 
 #include "bthid_host.h"
@@ -19,6 +21,7 @@ const TUint8 KHidpSetProtoBoot = 0x70; // HIDP SET_PROTOCOL, parametro 0 = boot
 const TUint8 KHidpDataInput   = 0xA1;  // HIDP DATA, reporte de entrada
 const TInt   KRetryFirstUs    = 3000000;
 const TInt   KRetryUs         = 8000000;
+const TInt   KWaitIntrUs      = 5000000;  // conexion entrante: control llego, esperando el canal de datos
 
 class CBtHidDevice : public CActive
 {
@@ -26,6 +29,8 @@ public:
 	CBtHidDevice( CBtHidHost &aHost, const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName );
 	~CBtHidDevice();
 	void Start();
+	void AdoptCtrl( RSocket &aSock );
+	void AdoptIntr( RSocket &aSock );
 	const TBTDevAddr &Addr() const { return iAddr; }
 	TInt Type() const { return iType; }
 	const TDesC8 &Name() const { return iName; }
@@ -33,11 +38,12 @@ public:
 	TInt Error() const { return iError; }
 
 private:
-	enum TState { EIdle, EConnCtrl, EConnIntr, ESetProto, EReading, EWaitRetry };
+	enum TState { EIdle, EConnCtrl, EConnIntr, ESetProto, EReading, EWaitRetry, EWaitIntr };
 
 	void RunL();
 	void DoCancel();
 	TInt RunError( TInt aError );
+	void SetProtocol();
 	void ConnectChannel( RSocket &aSock, TUint aPsm );
 	void CloseSockets();
 	void Retry( TInt aErr );
@@ -195,11 +201,10 @@ void CBtHidDevice::RunL()
 		break;
 	case EConnIntr:
 		if( err != KErrNone ) { Retry( err ); break; }
-		iCmd.SetLength( 1 );
-		iCmd[0] = KHidpSetProtoBoot;
-		iState = ESetProto;
-		iCtrl.Write( iCmd, iStatus );
-		SetActive();
+		SetProtocol();
+		break;
+	case EWaitIntr:
+		Retry( KErrTimedOut ); // llego el canal de control pero nunca el de datos
 		break;
 	case ESetProto:
 		// si el SET_PROTOCOL falla igual leemos: los mouse simples ya mandan el mismo formato
@@ -222,6 +227,56 @@ void CBtHidDevice::RunL()
 	}
 }
 
+void CBtHidDevice::SetProtocol()
+{
+	iCmd.SetLength( 1 );
+	iCmd[0] = KHidpSetProtoBoot;
+	iState = ESetProto;
+	iCtrl.Write( iCmd, iStatus );
+	SetActive();
+}
+
+/* conexion entrante del dispositivo (CBtHidListener): primero llega el canal de control y despues el de datos */
+void CBtHidDevice::AdoptCtrl( RSocket &aSock )
+{
+	Cancel();
+	ReleaseAll();
+	CloseSockets();
+	iCtrl = aSock;
+	iCtrlOpen = ETrue;
+	iState = EWaitIntr;
+	if( !iTimerOpen )
+		return;
+	iTimer.After( iStatus, KWaitIntrUs );
+	SetActive();
+}
+
+void CBtHidDevice::AdoptIntr( RSocket &aSock )
+{
+	if( iState != EWaitIntr ) // datos sin control: raro, pero lo usamos igual
+	{
+		Cancel();
+		ReleaseAll();
+		CloseSockets();
+	}
+	else
+		Cancel(); // el timer
+	iIntr = aSock;
+	iIntrOpen = ETrue;
+	if( iCtrlOpen )
+	{
+		SetProtocol();
+		return;
+	}
+	iConnected = ETrue;
+	iFails = 0;
+	iError = KErrNone;
+	Log( "conectado (sin canal de control)", KErrNone );
+	iState = EReading;
+	iIntr.Recv( iBuf, 0, iStatus );
+	SetActive();
+}
+
 TInt CBtHidDevice::RunError( TInt aError )
 {
 	Retry( aError );
@@ -230,7 +285,7 @@ TInt CBtHidDevice::RunError( TInt aError )
 
 void CBtHidDevice::DoCancel()
 {
-	if( iState == EWaitRetry )
+	if( iState == EWaitRetry || iState == EWaitIntr )
 	{
 		iTimer.Cancel();
 		return;
@@ -295,6 +350,98 @@ void CBtHidDevice::Keyboard( const TDesC8 &aData )
 
 /* ------------------------------------------------------------------ */
 
+/* escucha un canal HID (control o datos) para las conexiones que inicia el dispositivo */
+class CBtHidListener : public CActive
+{
+public:
+	CBtHidListener( CBtHidHost &aHost, TUint aPsm ) : CActive( EPriorityStandard ), iHost( aHost ), iPsm( aPsm )
+	{
+		CActiveScheduler::Add( this );
+	}
+	~CBtHidListener()
+	{
+		Cancel();
+		if( iBlankOpen ) iBlank.Close();
+		if( iListenOpen ) iListen.Close();
+	}
+	void Start()
+	{
+		TBTSockAddr        addr;
+		TBTServiceSecurity sec;
+		TInt               err;
+		TBuf8<64>          msg;
+
+		err = iListen.Open( iHost.SocketServ(), KBTAddrFamily, KSockSeqPacket, KL2CAP );
+		if( err == KErrNone )
+		{
+			iListenOpen = ETrue;
+			sec.SetUid( TUid::Uid( 0xE0D69650 ));
+			sec.SetAuthentication( ETrue );
+			sec.SetEncryption( ETrue );
+			sec.SetAuthorisation( EFalse );
+			addr.SetPort( iPsm );
+			addr.SetSecurity( sec );
+			err = iListen.Bind( addr );
+		}
+		if( err == KErrNone )
+			err = iListen.Listen( 2 );
+		if( err != KErrNone )
+		{
+			// KErrInUse: otro (el hidsrv de Hinkka, el HID del sistema en Symbian^3) ya escucha este canal
+			msg.Format( _L8( "no se puede escuchar el canal 0x%x (%d)" ), iPsm, err );
+			iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+			return;
+		}
+		Accept();
+	}
+
+private:
+	void Accept()
+	{
+		if( iBlankOpen ) { iBlank.Close(); iBlankOpen = EFalse; }
+		if( iBlank.Open( iHost.SocketServ()) != KErrNone )
+			return;
+		iBlankOpen = ETrue;
+		iListen.Accept( iBlank, iStatus );
+		SetActive();
+	}
+	void RunL()
+	{
+		if( iStatus.Int() == KErrNone )
+		{
+			TBTSockAddr remote;
+			iBlank.RemoteName( remote );
+			iBlankOpen = EFalse; // el socket ahora es del dispositivo (o lo cierra Incoming)
+			iHost.Incoming( iPsm, iBlank, remote.BTAddr());
+		}
+		Accept();
+	}
+	void DoCancel() { iListen.CancelAccept(); }
+
+	CBtHidHost &iHost;
+	TUint       iPsm;
+	RSocket     iListen, iBlank;
+	TBool       iListenOpen, iBlankOpen;
+};
+
+void CBtHidHost::Incoming( TUint aPsm, RSocket &aSock, const TBTDevAddr &aAddr )
+{
+	TInt i;
+
+	for( i = 0; i < EMaxDevices; i++ )
+	{
+		if( !iDev[i] || iDev[i]->Addr() != aAddr )
+			continue;
+		if( aPsm == KHidCtrlPsm )
+			iDev[i]->AdoptCtrl( aSock );
+		else
+			iDev[i]->AdoptIntr( aSock );
+		return;
+	}
+	aSock.Close(); // no es un dispositivo elegido
+	iObserver.BtHidLog( "conexion entrante de un dispositivo no elegido: rechazada" );
+}
+
 CBtHidHost *CBtHidHost::NewL( MBtHidObserver &aObserver, const TDesC &aSaveFile )
 {
 	CBtHidHost *self = new( ELeave ) CBtHidHost( aObserver );
@@ -315,6 +462,10 @@ void CBtHidHost::ConstructL( const TDesC &aSaveFile )
 	User::LeaveIfError( iSs.Connect());
 	iFile.Copy( aSaveFile.Left( iFile.MaxLength()));
 	Load();
+	iListenCtrl = new( ELeave ) CBtHidListener( *this, KHidCtrlPsm );
+	iListenIntr = new( ELeave ) CBtHidListener( *this, KHidIntrPsm );
+	iListenCtrl->Start();
+	iListenIntr->Start();
 }
 
 CBtHidHost::~CBtHidHost()
@@ -322,6 +473,8 @@ CBtHidHost::~CBtHidHost()
 	TInt i;
 
 	Cancel();
+	delete iListenCtrl;
+	delete iListenIntr;
 	for( i = 0; i < EMaxDevices; i++ )
 		delete iDev[i];
 	if( iNotifierOpen )
