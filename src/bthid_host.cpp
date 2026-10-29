@@ -133,6 +133,7 @@ private:
 	void KeyboardState( TUint8 aMods, const TUint8 *aKeys );
 	void StartSdp();
 	void LogLayout();
+	void LogDescriptor();
 	void Log( const char *aWhat, TInt aErr );
 
 	CBtHidHost &iHost;
@@ -158,6 +159,9 @@ private:
 	TBool       iProtoBoot;      // en esta conexion pedimos boot (no teniamos descriptor)
 	CBtHidSdp  *iSdp;
 	TBool       iSdpTried;
+	TBool       iDescLogged;
+	TInt        iLastBtnByte;    // para el log: cambios del byte de botones
+	TInt        iBtnLogged;
 };
 
 void CBtHidSdp::Finish( TInt aError )
@@ -291,10 +295,12 @@ void CBtHidDevice::Retry( TInt aErr )
 	ReleaseAll();
 	CloseSockets();
 	iError = aErr;
+	TBool dropped = iConnected;
 	if( iConnected )
 	{
 		Log( "desconectado", aErr );
 		iConnected = EFalse;
+		iFails = 0;
 	}
 	else if( iFails < 20 ) // cada intento (despues se calla, para no llenar el log con un mouse apagado)
 		Log( iState == EConnCtrl ? "fallo el canal de control" : iState == EConnIntr ? "fallo el canal de datos"
@@ -303,7 +309,8 @@ void CBtHidDevice::Retry( TInt aErr )
 	iState = EWaitRetry;
 	if( !iTimerOpen )
 		return;
-	iTimer.After( iStatus, iFails < 3 ? KRetryFirstUs : iFails < 6 ? KRetryUs : KRetrySlowUs );
+	// recien cortado el dispositivo esta despierto: volver a llamarlo ya
+	iTimer.After( iStatus, dropped ? 500000 : iFails < 3 ? KRetryFirstUs : iFails < 6 ? KRetryUs : KRetrySlowUs );
 	SetActive();
 }
 
@@ -335,6 +342,7 @@ void CBtHidDevice::RunL()
 		iError = KErrNone;
 		iRawLogged = 0;
 		Log( iProtoBoot ? "conectado (protocolo boot)" : "conectado (reportes del descriptor)", err );
+		LogDescriptor();
 		iState = EReading;
 		iIntr.Recv( iBuf, 0, iStatus );
 		SetActive();
@@ -390,7 +398,9 @@ void CBtHidDevice::AdoptIntr( RSocket &aSock )
 		Cancel(); // el timer
 	iIntr = aSock;
 	iIntrOpen = ETrue;
-	if( iCtrlOpen )
+	// cuando llama el dispositivo ya arranca en modo reportes (el que describe el descriptor): mandarle
+	// SET_PROTOCOL ahi cortaba la conexion (-18). Solo si no tenemos descriptor le pedimos boot
+	if( iCtrlOpen && !iLayout.iValid )
 	{
 		SetProtocol();
 		return;
@@ -398,8 +408,10 @@ void CBtHidDevice::AdoptIntr( RSocket &aSock )
 	iConnected = ETrue;
 	iFails = 0;
 	iError = KErrNone;
+	iRawLogged = 0;
 	iProtoBoot = !iLayout.iValid;
-	Log( "conectado (sin canal de control)", KErrNone );
+	Log( "conectado (llamo el dispositivo)", KErrNone );
+	LogDescriptor();
 	iState = EReading;
 	iIntr.Recv( iBuf, 0, iStatus );
 	SetActive();
@@ -449,12 +461,37 @@ void CBtHidDevice::DescriptorDone( TInt aError, const TDesC8 &aDesc )
 	iHost.Save(); // la proxima conexion ya usa los reportes del descriptor
 }
 
+/* el descriptor en hexa, una vez por arranque del servidor */
+void CBtHidDevice::LogDescriptor()
+{
+	TBuf8<160> msg;
+	TInt i;
+
+	if( iDescLogged || !iDesc.Length())
+		return;
+	iDescLogged = ETrue;
+	for( i = 0; i < iDesc.Length(); i++ )
+	{
+		if( i % 40 == 0 )
+		{
+			if( i )
+				iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+			msg.Format( _L8( "desc %03d:" ), i );
+		}
+		msg.AppendFormat( _L8( " %02x" ), iDesc[i] );
+	}
+	iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+	LogLayout();
+}
+
 void CBtHidDevice::LogLayout()
 {
 	TBuf8<120> msg;
-	msg.Format( _L8( "descriptor HID %d bytes: ids %d, x id %d bit %d/%d, y bit %d/%d, rueda id %d bit %d/%d, boton id %d bit %d" ),
+	msg.Format( _L8( "descriptor HID %d bytes: ids %d, x id %d bit %d/%d, y bit %d/%d, rueda id %d bit %d/%d, botones id %d bits %d %d %d (%d %d %d)" ),
 		iDesc.Length(), iLayout.iUsesIds, iLayout.iX.iReportId, iLayout.iX.iBit, iLayout.iX.iBits, iLayout.iY.iBit, iLayout.iY.iBits,
-		iLayout.iWheel.iReportId, iLayout.iWheel.iBit, iLayout.iWheel.iBits, iLayout.iButton[0].iReportId, iLayout.iButton[0].iBit );
+		iLayout.iWheel.iReportId, iLayout.iWheel.iBit, iLayout.iWheel.iBits, iLayout.iButton[0].iReportId,
+		iLayout.iButton[0].iBit, iLayout.iButton[1].iBit, iLayout.iButton[2].iBit,
+		iLayout.iButton[0].iBits, iLayout.iButton[1].iBits, iLayout.iButton[2].iBits );
 	iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
 	if( iLayout.iKeys.iBits )
 	{
@@ -518,6 +555,18 @@ TBool CBtHidDevice::LayoutReport( const TDesC8 &aData )
 	if( iLayout.iX.iBits && iLayout.iX.iReportId == id ) { mouse = ETrue; dx = HidField( p, iLayout.iX ); }
 	if( iLayout.iY.iBits && iLayout.iY.iReportId == id ) { mouse = ETrue; dy = HidField( p, iLayout.iY ); }
 	if( iLayout.iWheel.iBits && iLayout.iWheel.iReportId == id ) { mouse = ETrue; wheel = HidField( p, iLayout.iWheel ); }
+	// cada cambio del primer byte del reporte (los botones en casi todos los mouse) va al log, con el reporte
+	if( iBtnLogged < 30 && p.Length() && p[0] != iLastBtnByte )
+	{
+		TBuf8<120> msg;
+		TInt i;
+		iLastBtnByte = p[0];
+		iBtnLogged++;
+		msg.Format( _L8( "botones %d -> mascara %d:" ), id, buttons );
+		for( i = 0; i < aData.Length() && i < 24; i++ )
+			msg.AppendFormat( _L8( " %02x" ), aData[i] );
+		iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+	}
 	if( mouse )
 	{
 		iButtons = buttons;
