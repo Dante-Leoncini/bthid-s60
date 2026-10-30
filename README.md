@@ -54,3 +54,8 @@ Con el SDK de Symbian^3 y RVCT 2.2 (como xash3d-fwgs-symbian): `sbs -b group/bld
 
 UIDs: servidor `0xE0D69650`, DLL `0xE0D69651`, app `0xE0D69652`, `hidsrv.dll` `0xA00054C3` y paquete `0xA00054C4`
 (los dos ultimos, los del de Hinkka).
+
+## Licencia
+
+MIT (ver `LICENSE`). Los headers `inc/bthidclient.h` e `inc/bthidevent.h` son la API publica del de Hinkka,
+incluidos sin cambios para que las apps que ya lo usan sigan andando; esos dos no entran en la licencia.
