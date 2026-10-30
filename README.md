@@ -21,8 +21,10 @@ directo al dispositivo, lee los reportes tal cual vienen y manda apretado al apr
 - `bthidmgr.exe`: la app "Bluetooth HID" del menu. *Opciones > Buscar dispositivo* abre el cuadro de
   Bluetooth del telefono; el elegido queda guardado y se reconecta solo. Hasta un mouse y un teclado a la vez.
   *Opciones > Pruebas* tiene una prueba de mouse (arrastrar un cuadrado con cualquiera de los tres botones, la
-  rueda le cambia el tamano) y una de teclado (teclas apretadas, modificadores y lo que se escribe). La app
-  esta en ingles y en castellano, segun el idioma del telefono.
+  rueda le cambia el tamano) y una de teclado (teclas apretadas, modificadores y lo que se escribe).
+  *Opciones > Joystick de PS3* muestra la direccion Bluetooth del telefono, la que se le graba por USB a un
+  joystick de PS3 con `tools/ds3pair.py` (instrucciones en `tools/PS3.md`). La app esta en ingles y en castellano,
+  segun el idioma del telefono.
 
 - `hidsrv.dll`: el mismo cliente con el nombre y el UID (`0xA00054C3`) del de Hinkka, para las apps viejas que lo
   cargan (ScummVM, Quake 3...): andan sin cambios y con los botones arreglados.

@@ -5,7 +5,9 @@ y probarlos.
 Opciones > Buscar dispositivo abre el cuadro de Bluetooth del telefono; el elegido queda guardado en el
 servidor y se reconecta solo cada vez que una app lo usa. Opciones > Pruebas: la app recibe los eventos como
 cualquier juego (GetHIDClientAPI). En la del mouse se arrastra un cuadrado con cualquiera de los tres botones y
-la rueda le cambia el tamano; en la del teclado se ven las teclas apretadas y lo que se escribe.
+la rueda le cambia el tamano; en la del teclado se ven las teclas apretadas y lo que se escribe. Opciones >
+Joystick de PS3 muestra la direccion Bluetooth del telefono: la que se le graba por USB al joystick con
+tools/ds3pair.py para que llame al telefono.
 
 Textos en ingles o en castellano segun el idioma del telefono.
 */
@@ -31,6 +33,8 @@ Textos en ingles o en castellano segun el idioma del telefono.
 #include "version.h"
 #include <apgcli.h>
 #include <aknmessagequerydialog.h>
+#include <e32property.h>
+#include <bt_subscribe.h>
 
 const TUid KUidBtHidMgr = { 0xE0D69652 };
 
@@ -44,7 +48,7 @@ enum TTextId
 	ETxtMenuFind, ETxtMenuTests, ETxtMenuTestMouse, ETxtMenuTestKeys, ETxtMenuForget, ETxtMenuExit,
 	ETxtMouseHelp1, ETxtMouseHelp2, ETxtMouseSize, ETxtKeysHelp, ETxtKeysHeld, ETxtDown, ETxtUp, ETxtNoEvents,
 	ETxtWaiting, ETxtNone, ETxtMenuPickMouse, ETxtMenuPickKeys, ETxtMenuForgetMouse, ETxtMenuForgetKeys,
-	ETxtMenuAbout, ETxtAboutText,
+	ETxtMenuAbout, ETxtAboutText, ETxtMenuPs3, ETxtPs3Text, ETxtPs3NoAddr,
 	ETxtCount
 };
 
@@ -85,6 +89,9 @@ static const TText *const KTextEn[ETxtCount] =
 	_S( "Remove keyboard" ),
 	_S( "About" ),
 	_S( "Version %S\nBluetooth mouse and keyboard driver made by Dante Leoncini.\n\nDonations are welcome:\n<AknMessageQuery Link>leoncini.com.ar</AknMessageQuery Link>\n\nMIT license" ),
+	_S( "PS3 controller" ),
+	_S( "This phone's Bluetooth address:\n%S\n\nWrite it to the PS3 controller by USB from a computer, with ds3pair (github.com/Dante-Leoncini/bthid-s60, tools/PS3.md). Then unplug it and press PS." ),
+	_S( "(turn Bluetooth on and try again)" ),
 };
 
 static const TText *const KTextEs[ETxtCount] =
@@ -124,6 +131,9 @@ static const TText *const KTextEs[ETxtCount] =
 	_S( "Quitar teclado" ),
 	_S( "Acerca de" ),
 	_S( "Version %S\nDriver de mouse y teclado Bluetooth hecho por Dante Leoncini.\n\nSe aceptan donaciones:\n<AknMessageQuery Link>leoncini.com.ar</AknMessageQuery Link>\n\nLicencia MIT" ),
+	_S( "Joystick de PS3" ),
+	_S( "Direcci\x00f3n Bluetooth de este tel\x00e9\x0066ono:\n%S\n\nGrabala en el joystick de PS3 por USB desde una computadora, con ds3pair (github.com/Dante-Leoncini/bthid-s60, tools/PS3.md). Despu\x00e9s desenchufalo y apret\x00e1 PS." ),
+	_S( "(prend\x00e9 el Bluetooth y prob\x00e1 de nuevo)" ),
 };
 
 static TBool gSpanish;
@@ -131,6 +141,19 @@ static TBool gSpanish;
 static TPtrC Txt( TInt aId )
 {
 	return TPtrC( gSpanish ? KTextEs[aId] : KTextEn[aId] );
+}
+
+/* la direccion Bluetooth del telefono (la de *#2820#), que publica el stack Bluetooth; vacia si no la publico
+   (el Bluetooth nunca se prendio) */
+static void PhoneAddress( TDes &aText )
+{
+	TBuf8<16> addr;
+
+	aText.Zero();
+	if( RProperty::Get( KPropertyUidBluetoothCategory, KPropertyKeyBluetoothGetLocalDeviceAddress, addr ) != KErrNone
+		|| addr.Length() != 6 || addr == TPtrC8( (const TUint8 *)"\0\0\0\0\0\0", 6 ))
+		return;
+	aText.Format( _L( "%02X:%02X:%02X:%02X:%02X:%02X" ), addr[0], addr[1], addr[2], addr[3], addr[4], addr[5] );
 }
 
 /* ------------------------------------------------------------------ */
@@ -594,6 +617,7 @@ private:
 			aMenuPane->SetItemTextL( EBtHidCmdTests, Txt( ETxtMenuTests ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetMouse, Txt( ETxtMenuForgetMouse ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetKeyboard, Txt( ETxtMenuForgetKeys ));
+			aMenuPane->SetItemTextL( EBtHidCmdPs3, Txt( ETxtMenuPs3 ));
 			aMenuPane->SetItemTextL( EBtHidCmdAbout, Txt( ETxtMenuAbout ));
 			aMenuPane->SetItemTextL( EAknCmdExit, Txt( ETxtMenuExit ));
 		}
@@ -658,6 +682,22 @@ private:
 			dlg->PrepareLC( R_MGR_ABOUT );
 			dlg->SetHeaderTextL( title );
 			dlg->SetLink( web );
+			dlg->RunLD();
+			break;
+		}
+		case EBtHidCmdPs3:
+		{
+			/* la direccion del telefono, para grabarsela por USB a un joystick de PS3 (tools/ds3pair.py) */
+			TBuf<48>  addr;
+			TBuf<400> text;
+			CAknMessageQueryDialog *dlg;
+			PhoneAddress( addr );
+			if( !addr.Length())
+				addr = Txt( ETxtPs3NoAddr );
+			text.Format( Txt( ETxtPs3Text ), &addr );
+			dlg = CAknMessageQueryDialog::NewL( text );
+			dlg->PrepareLC( R_MGR_ABOUT );
+			dlg->SetHeaderTextL( Txt( ETxtMenuPs3 ));
 			dlg->RunLD();
 			break;
 		}

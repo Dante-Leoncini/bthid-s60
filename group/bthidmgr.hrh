@@ -12,7 +12,8 @@ enum TBtHidMgrCommands
 	EBtHidCmdPickKeyboard,
 	EBtHidCmdForgetMouse,
 	EBtHidCmdForgetKeyboard,
-	EBtHidCmdAbout
+	EBtHidCmdAbout,
+	EBtHidCmdPs3
 };
 
 #endif
