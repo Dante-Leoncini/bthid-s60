@@ -101,6 +101,28 @@ void CBtHidSession::Push( const THIDEvent &aEvent )
 {
 	if( !iWantsEvents )
 		return;
+	// el mouse manda ~100 reportes por segundo y las apps leen un evento por vuelta de su loop (uno por frame):
+	// sin juntar los movimientos la cola crece y el puntero sigue moviendose segundos despues de soltar el mouse.
+	// Un movimiento (o rueda) detras de otro igual se suma al que ya esta en la cola
+	if( iCount && aEvent.Type() == THIDEvent::EMouseEvent )
+	{
+		THIDEvent &last = iEvents[( iHead + iCount - 1 ) % KQueueSize];
+		TMouseEvent *m = aEvent.Mouse(), *l = last.Mouse();
+		if( last.Type() == THIDEvent::EMouseEvent && l->iType == m->iType )
+		{
+			if( m->iType == EEventRelativeXY )
+			{
+				l->iPosition.iX += m->iPosition.iX;
+				l->iPosition.iY += m->iPosition.iY;
+				return;
+			}
+			if( m->iType == EEventRelativeWheel )
+			{
+				l->iValue += m->iValue;
+				return;
+			}
+		}
+	}
 	if( iCount == KQueueSize ) // lleno: tirar el mas viejo
 	{
 		iHead = ( iHead + 1 ) % KQueueSize;
