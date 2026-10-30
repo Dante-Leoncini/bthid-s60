@@ -4,11 +4,12 @@ ds3pair.py - le graba a un joystick de PS3 (DualShock 3 / Sixaxis) por USB la di
 que tiene guardada. Con la del telefono, llama al telefono y el driver lo atiende.
 
     python ds3pair.py                       muestra los joysticks enchufados: su direccion y a quien llaman
-    python ds3pair.py 00:1A:2B:3C:4D:5E     les graba esa direccion (la del telefono: *#2820# en Nokia)
+    python ds3pair.py 00:1A:2B:3C:4D:5E     les graba esa direccion (la del telefono: en la app Bluetooth HID,
+                                            Opciones > Joystick de PS3, o *#2820# en Nokia; va con o sin los ':')
 
 Windows (API HID del sistema) o Linux (/dev/hidraw, con sudo), sin instalar nada. El joystick va por el cable USB.
-En Windows muchos joysticks genericos se ponen en modo Xbox 360 y no aceptan esto; en Linux el driver hid-sony
-los arranca como la PS3 y suelen aparecer como de PS3: probar ahi.
+Muchos joysticks genericos arrancan en modo Xbox 360 (045e:028e) y asi no aceptan esto. En Linux, con sudo, se
+intenta pasarlos a modo PS3: se saca un rato el driver xpad (el de Xbox) y se pide desenchufarlo y enchufarlo.
 """
 import ctypes
 import os
@@ -17,21 +18,48 @@ import sys
 SONY, DS3 = 0x054C, 0x0268
 # genericos que hablan como el DualShock 3 (vendor, producto)
 PADS = {(SONY, DS3), (0x2563, 0x0575), (0x0E8F, 0x3075), (0x2563, 0x0523)}
+# el modo Xbox 360 de los genericos (y del de Microsoft)
+XBOX = (0x045E, 0x028E)
 
 
 def fmt(a):
     return ':'.join('%02X' % x for x in a)
 
 
-def linux_main(nueva):
-    """lo mismo por /dev/hidraw: HIDIOCGFEATURE / HIDIOCSFEATURE (el byte 0 es el numero de reporte, como en Windows)"""
-    import fcntl
+def direccion(texto):
+    """'00:1A:2B:3C:4D:5E', '00-1A-...' o '001a2b3c4d5e' (asi la muestra *#2820#) -> 6 bytes"""
+    h = texto.replace(':', '').replace('-', '').replace(' ', '')
+    if len(h) != 12:
+        raise ValueError(texto)
+    return bytes.fromhex(h)
+
+
+def linux_usb():
+    """(vendor, producto, nombre, carpeta en /sys) de cada cosa enchufada por USB"""
     import glob
 
-    def ioc(dirn, nr, size):
-        return (dirn << 30) | (size << 16) | (ord('H') << 8) | nr
+    out = []
+    for d in sorted(glob.glob('/sys/bus/usb/devices/*')):
+        try:
+            ven = int(open(d + '/idVendor').read(), 16)
+            pro = int(open(d + '/idProduct').read(), 16)
+        except (OSError, ValueError):
+            continue
+        nombre = []
+        for f in ('manufacturer', 'product'):
+            try:
+                nombre.append(open(d + '/' + f).read().strip())
+            except OSError:
+                pass
+        out.append((ven, pro, ' '.join(nombre), d))
+    return out
 
-    encontrados = 0
+
+def linux_joysticks(avisar):
+    """(ruta en /dev, vendor, producto, nombre) de cada joystick de PS3 que hay en /dev/hidraw"""
+    import glob
+
+    out = []
     for dev in sorted(glob.glob('/sys/class/hidraw/hidraw*')):
         try:
             uevent = open(dev + '/device/uevent').read()
@@ -44,11 +72,88 @@ def linux_main(nueva):
         ven, pro = int(ven, 16), int(pro, 16)
         name = [l.split('=', 1)[1] for l in uevent.splitlines() if l.startswith('HID_NAME=')]
         if (ven, pro) not in PADS:
-            print('(%s: %04x:%04x %s, no es de PS3)' % (os.path.basename(dev), ven, pro, name[0] if name else ''))
+            if avisar:
+                print('(%s: %04x:%04x %s, no es de PS3)' % (os.path.basename(dev), ven, pro, name[0] if name else ''))
             continue
-        encontrados += 1
-        path = '/dev/' + os.path.basename(dev)
-        fd = os.open(path, os.O_RDWR)
+        out.append(('/dev/' + os.path.basename(dev), ven, pro, name[0] if name else ''))
+    return out
+
+
+def linux_sacar_de_xbox(xbox):
+    """un generico en modo Xbox 360: lo toma el driver xpad, le habla como Windows y el joystick se queda en ese
+    modo. La PS3 no le dice nada de eso y el joystick pasa a modo PS3. Aca se hace lo mismo: se saca xpad y se
+    bloquea un rato (en /run, que se borra solo al reiniciar), se pide desenchufarlo y enchufarlo, y se espera a que
+    aparezca como joystick de PS3. Al terminar xpad vuelve."""
+    import subprocess
+    import time
+
+    for ven, pro, nombre, d in xbox:
+        print('%s (%04x:%04x %s): esta en modo Xbox 360, asi no acepta la direccion' % (os.path.basename(d), ven, pro,
+              nombre))
+    if os.geteuid() != 0:
+        print('Para intentar pasarlo a modo PS3 hay que correr esto con sudo.')
+        return []
+    bloqueo = '/run/modprobe.d/ds3pair-sin-xpad.conf'
+    try:
+        if not os.path.isdir('/run/modprobe.d'):
+            os.makedirs('/run/modprobe.d')
+        with open(bloqueo, 'w') as f:
+            f.write('blacklist xpad\n')  # que no se vuelva a cargar solo al enchufarlo
+        if subprocess.call(['modprobe', '-r', 'xpad']) != 0:
+            print('No se pudo sacar el driver xpad (esta en uso, o viene dentro del kernel).')
+            return []
+        print()
+        print('Desenchufa el joystick, espera 5 segundos y enchufalo de nuevo (sin apretar nada)...')
+        antes = set(u[:3] for u in linux_usb())
+        desenchufado = False
+        volvio = None  # cuando volvio a aparecer en modo Xbox
+        fin = time.time() + 180
+        while time.time() < fin:
+            time.sleep(0.5)
+            pads = linux_joysticks(False)
+            if pads:
+                print('   ahora esta en modo PS3')
+                return pads
+            ahora = set(u[:3] for u in linux_usb())
+            for ven, pro, nombre in ahora - antes:
+                print('   enchufado: %04x:%04x %s' % (ven, pro, nombre))
+            hay_xbox = any(u[:2] == XBOX for u in ahora)
+            if not hay_xbox and not desenchufado:
+                desenchufado = True
+                print('   desenchufado')
+            if hay_xbox and desenchufado and volvio is None:
+                volvio = time.time()
+                print('   volvio en modo Xbox: espero 30 segundos a ver si cambia solo...')
+            if volvio and time.time() - volvio > 30:
+                break
+            antes = ahora
+        print('Sigue en modo Xbox: este joystick no se deja pasar a modo PS3 desde la PC. Probar por Bluetooth:')
+        print('desenchufarlo, mantener PS + Start hasta que titile y buscarlo desde el telefono (ver tools/PS3.md).')
+        return []
+    finally:
+        try:
+            os.remove(bloqueo)
+        except OSError:
+            pass
+        subprocess.call(['modprobe', 'xpad'])
+
+
+def linux_grabar(pads, nueva):
+    """por /dev/hidraw: HIDIOCGFEATURE / HIDIOCSFEATURE (el byte 0 es el numero de reporte, como en Windows)"""
+    import fcntl
+
+    def ioc(dirn, nr, size):
+        return (dirn << 30) | (size << 16) | (ord('H') << 8) | nr
+
+    todo_bien = True
+    for path, ven, pro, name in pads:
+        try:
+            fd = os.open(path, os.O_RDWR)
+        except OSError as e:
+            print('joystick %s (%04x:%04x %s): no se puede abrir (%s): correrlo con sudo' % (path, ven, pro, name,
+                  e.strerror))
+            todo_bien = False
+            continue
         n = 64
         def get(rid):
             b = bytearray(n)
@@ -60,7 +165,7 @@ def linux_main(nueva):
                 return None
         propia = get(0xF2)
         llama = get(0xF5)
-        print('joystick %s (%04x:%04x %s): direccion %s, llama a %s' % (path, ven, pro, name[0] if name else '',
+        print('joystick %s (%04x:%04x %s): direccion %s, llama a %s' % (path, ven, pro, name,
               fmt(propia[5:11]) if propia else '?', fmt(llama[3:9]) if llama else '?'))
         if nueva:
             b = bytearray(8)
@@ -74,21 +179,40 @@ def linux_main(nueva):
                 print('   no lo acepto: %s' % e)
             llama = get(0xF5)
             print('   grabado %s -> ahora llama a %s' % ('bien' if ok else 'MAL', fmt(llama[3:9]) if llama else '?'))
+            todo_bien = todo_bien and ok
         os.close(fd)
-    if not encontrados:
+    if nueva and todo_bien:
+        print('Listo: desenchufalo y apreta PS, llama al telefono.')
+    return 0 if todo_bien else 1
+
+
+def linux_main(nueva):
+    pads = linux_joysticks(True)
+    if not pads:
+        xbox = [u for u in linux_usb() if u[:2] == XBOX]
+        if xbox:
+            pads = linux_sacar_de_xbox(xbox)
+            if not pads:
+                return 1
+    if not pads:
         print('No hay ningun joystick de PS3 enchufado por USB (lsusb dice que hay?).')
         return 1
-    return 0
+    return linux_grabar(pads, nueva)
+
+
+def leer_direccion():
+    """la direccion que se pasa al correrlo, o None para solo mirar"""
+    if len(sys.argv) < 2:
+        return None
+    try:
+        return direccion(sys.argv[1])
+    except ValueError:
+        print('La direccion va asi: 00:1A:2B:3C:4D:5E (o 001a2b3c4d5e, como la muestra *#2820#)')
+        sys.exit(1)
 
 
 if sys.platform != 'win32':
-    def main():
-        nueva = None
-        if len(sys.argv) > 1:
-            nueva = bytes(int(x, 16) for x in sys.argv[1].replace('-', ':').split(':'))
-            assert len(nueva) == 6, 'La direccion va asi: 00:1A:2B:3C:4D:5E'
-        return linux_main(nueva)
-    sys.exit(main())
+    sys.exit(linux_main(leer_direccion()))
 
 import ctypes.wintypes as W
 
@@ -181,18 +305,12 @@ def get_feature(h, n, rid):
 
 
 def main():
+    nueva = leer_direccion()
     pads = joysticks()
     if not pads:
-        print('No hay ningun joystick de PS3 enchufado por USB.')
+        print('No hay ningun joystick de PS3 enchufado por USB. (Si Windows lo ve como un mando de Xbox 360,')
+        print('esta en modo Xbox y asi no acepta la direccion: probar en Linux, ver tools/PS3.md.)')
         return 1
-    nueva = None
-    if len(sys.argv) > 1:
-        try:
-            nueva = bytes(int(x, 16) for x in sys.argv[1].replace('-', ':').split(':'))
-            assert len(nueva) == 6
-        except Exception:
-            print('La direccion va asi: 00:1A:2B:3C:4D:5E')
-            return 1
     for k, (path, h, n) in enumerate(pads):
         # (en Windows el byte 0 es el numero de reporte: todo va uno mas que en sixpair, el de Linux)
         propia = get_feature(h, n, 0xF2)   # la direccion del joystick: bytes 5..10
