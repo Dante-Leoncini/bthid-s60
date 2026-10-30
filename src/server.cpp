@@ -288,6 +288,16 @@ TInt CBtHidServer::Clients() const
 
 void CBtHidServer::Push( const THIDEvent &aEvent )
 {
+	// el sistema no ve el mouse ni el teclado como actividad (no pasan por sus teclas): sin esto
+	// la pantalla se oscurecia y se bloqueaba mientras se usaban. Una vez cada medio segundo alcanza.
+	static TUint lastActivity = 0;
+	TUint now = User::NTickCount();
+	if( now - lastActivity > 500 )
+	{
+		User::ResetInactivityTime();
+		lastActivity = now;
+	}
+
 	TDblQueIter<CBtHidSession> it( iQueue );
 	CBtHidSession *s;
 	while(( s = it++ ) != NULL )
