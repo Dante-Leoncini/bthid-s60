@@ -17,4 +17,5 @@
 "$(EPOCROOT)epoc32\release\$(PLATFORM)\$(TARGET)\hidsrv.dll"       - "!:\sys\bin\hidsrv.dll"
 "$(EPOCROOT)epoc32\release\$(PLATFORM)\$(TARGET)\bthidmgr.exe"     - "!:\sys\bin\bthidmgr.exe"
 "$(EPOCROOT)epoc32\data\z\resource\apps\bthidmgr.rsc" - "!:\resource\apps\bthidmgr.rsc"
+"$(EPOCROOT)epoc32\data\z\resource\apps\bthidmgr_icon.mif" - "!:\resource\apps\bthidmgr_icon.mif"
 "$(EPOCROOT)epoc32\data\z\private\10003a3f\import\apps\bthidmgr_reg.rsc" - "!:\private\10003a3f\import\apps\bthidmgr_reg.rsc"

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- icono de Bluetooth HID: un mouse (dibujo propio, licencia MIT como el resto del repo) -->
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="tiny" width="88" height="88" viewBox="0 0 88 88">
+  <defs>
+    <linearGradient id="cuerpo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#aeb7c2"/>
+    </linearGradient>
+  </defs>
+  <!-- el cable -->
+  <path d="M44 9 C44 2 54 2 58 6" fill="none" stroke="#20262c" stroke-width="2.5"/>
+  <!-- el cuerpo -->
+  <rect x="21" y="9" width="46" height="72" rx="23" ry="23" fill="url(#cuerpo)" stroke="#20262c" stroke-width="3"/>
+  <!-- los dos botones -->
+  <path d="M21 37 L67 37" fill="none" stroke="#20262c" stroke-width="2.5"/>
+  <path d="M44 10 L44 37" fill="none" stroke="#20262c" stroke-width="2.5"/>
+  <!-- la rueda -->
+  <rect x="39.5" y="16" width="9" height="15" rx="4.5" ry="4.5" fill="#1e6fd9" stroke="#20262c" stroke-width="1.5"/>
+</svg>

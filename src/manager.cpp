@@ -28,6 +28,8 @@ Textos en ingles o en castellano segun el idioma del telefono.
 #include "bthidclient.h"
 #include "bthidmgr.hrh"
 #include "cursor.h"
+#include "version.h"
+#include <apgcli.h>
 
 const TUid KUidBtHidMgr = { 0xE0D69652 };
 
@@ -41,6 +43,7 @@ enum TTextId
 	ETxtMenuFind, ETxtMenuTests, ETxtMenuTestMouse, ETxtMenuTestKeys, ETxtMenuForget, ETxtMenuExit,
 	ETxtMouseHelp1, ETxtMouseHelp2, ETxtMouseSize, ETxtKeysHelp, ETxtKeysHeld, ETxtDown, ETxtUp, ETxtNoEvents,
 	ETxtWaiting, ETxtNone, ETxtMenuPickMouse, ETxtMenuPickKeys, ETxtMenuForgetMouse, ETxtMenuForgetKeys,
+	ETxtMenuAbout, ETxtAboutText,
 	ETxtCount
 };
 
@@ -79,6 +82,8 @@ static const TText *const KTextEn[ETxtCount] =
 	_S( "Choose keyboard" ),
 	_S( "Remove mouse" ),
 	_S( "Remove keyboard" ),
+	_S( "About" ),
+	_S( "Bluetooth mouse and keyboard driver by Dante Leoncini. leoncini.com.ar - MIT license" ),
 };
 
 static const TText *const KTextEs[ETxtCount] =
@@ -116,6 +121,8 @@ static const TText *const KTextEs[ETxtCount] =
 	_S( "Elegir teclado" ),
 	_S( "Quitar mouse" ),
 	_S( "Quitar teclado" ),
+	_S( "Acerca de" ),
+	_S( "Driver de mouse y teclado Bluetooth de Dante Leoncini. leoncini.com.ar - Licencia MIT" ),
 };
 
 static TBool gSpanish;
@@ -586,6 +593,7 @@ private:
 			aMenuPane->SetItemTextL( EBtHidCmdTests, Txt( ETxtMenuTests ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetMouse, Txt( ETxtMenuForgetMouse ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetKeyboard, Txt( ETxtMenuForgetKeys ));
+			aMenuPane->SetItemTextL( EBtHidCmdAbout, Txt( ETxtMenuAbout ));
 			aMenuPane->SetItemTextL( EAknCmdExit, Txt( ETxtMenuExit ));
 		}
 		else if( aResourceId == R_MGR_TESTS_MENU )
@@ -620,6 +628,26 @@ private:
 				iMgr.Forget( aCommand == EBtHidCmdForgetKeyboard ? EBtHidKeyboard : EBtHidMouse );
 			Refresh();
 			break;
+		case EBtHidCmdAbout:
+		{
+			/* la version del driver (version.h), para saber cual tiene instalado cada telefono */
+			TBuf<40> title;
+			title.Copy( _L8( "Bluetooth HID " BTHID_VERSION ));
+			iEikonEnv->InfoWinL( title, Txt( ETxtAboutText ));
+			break;
+		}
+		case EBtHidCmdWeb:
+		{
+			/* el navegador del telefono (UID 0x10008D39) con la pagina: "4 <url>" = abrir esa direccion */
+			RApaLsSession ls;
+			if( ls.Connect() == KErrNone )
+			{
+				TThreadId id;
+				ls.StartDocument( _L( "4 http://leoncini.com.ar" ), TUid::Uid( 0x10008D39 ), id );
+				ls.Close();
+			}
+			break;
+		}
 		case EBtHidCmdTestMouse:
 			SetMode( EModeMouse );
 			break;

@@ -7,6 +7,7 @@ PRJ_EXPORTS
 ../inc/bthidmanager.h  bthidhost/bthidmanager.h
 
 PRJ_MMPFILES
+gnumakefile icons.mk
 bthidhostsrv.mmp
 bthidhost.mmp
 hidsrv.mmp

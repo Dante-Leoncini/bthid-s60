@@ -15,6 +15,7 @@ que se va la ultima app.
 #include "bthidproto.h"
 #include "bthidevent.h"
 #include "bthid_host.h"
+#include "version.h"
 
 const TInt KQueueSize     = 128;       // eventos por app (si una app no lee, se pierden los mas viejos)
 const TInt KShutdownDelay = 60000000;  // us sin apps conectadas antes de cerrar (y soltar el Bluetooth)
@@ -218,7 +219,7 @@ void CBtHidServer::ConstructL()
 	TFileName file;
 
 	StartL( KBtHidServerName );
-	BtHidLog( "servidor arrancado" );
+	BtHidLog( "servidor arrancado, version " BTHID_VERSION );
 	iShutdown = CPeriodic::NewL( EPriorityIdle );
 
 	// los dispositivos elegidos se guardan en la carpeta privada del servidor (c:\private\e0d69650)

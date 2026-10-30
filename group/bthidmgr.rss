@@ -30,6 +30,8 @@ RESOURCE MENU_PANE r_mgr_menu
 		MENU_ITEM { command = EBtHidCmdTests;          txt = "Tests"; cascade = r_mgr_tests_menu; },
 		MENU_ITEM { command = EBtHidCmdForgetMouse;    txt = "Remove mouse"; },
 		MENU_ITEM { command = EBtHidCmdForgetKeyboard; txt = "Remove keyboard"; },
+		MENU_ITEM { command = EBtHidCmdAbout;          txt = "About"; },
+		MENU_ITEM { command = EBtHidCmdWeb;            txt = "leoncini.com.ar"; },
 		MENU_ITEM { command = EAknCmdExit;             txt = "Exit"; }
 	};
 }
@@ -52,6 +54,7 @@ RESOURCE LOCALISABLE_APP_INFO r_mgr_localisable_app_info
 	caption_and_icon = CAPTION_AND_ICON_INFO
 	{
 		caption = STRING_app_caption_string;
-		number_of_icons = 0;
+		number_of_icons = 1;
+		icon_file = "\\resource\\apps\\bthidmgr_icon.mif";
 	};
 }
