@@ -519,6 +519,22 @@ void CBtHidDevice::DescriptorDone( TInt aError, const TDesC8 &aDesc, TInt aFlags
 		LogLayout();
 	}
 	iHost.Save(); // la proxima conexion ya usa los reportes del descriptor
+
+	/* la primera vez el descriptor llega con el mouse ya conectado en boot, y en boot no manda la rueda:
+	   pasarlo ya a los reportes del descriptor (en el canal de control, aparte de la lectura que esta
+	   esperando en el de datos) */
+	if( iConnected && iProtoBoot && iLayout.iValid && iCtrlOpen )
+	{
+		TBuf8<1>       cmd;
+		TRequestStatus st;
+		cmd.SetLength( 1 );
+		cmd[0] = KHidpSetProtoReport;
+		iCtrl.Write( cmd, st );
+		User::WaitForRequest( st );
+		if( st.Int() == KErrNone )
+			iProtoBoot = EFalse;
+		Log( "paso a los reportes del descriptor (rueda)", st.Int());
+	}
 }
 
 /* el descriptor en hexa, una vez por arranque del servidor */
