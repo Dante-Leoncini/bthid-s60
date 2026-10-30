@@ -30,6 +30,7 @@ Textos en ingles o en castellano segun el idioma del telefono.
 #include "cursor.h"
 #include "version.h"
 #include <apgcli.h>
+#include <aknmessagequerydialog.h>
 
 const TUid KUidBtHidMgr = { 0xE0D69652 };
 
@@ -83,7 +84,7 @@ static const TText *const KTextEn[ETxtCount] =
 	_S( "Remove mouse" ),
 	_S( "Remove keyboard" ),
 	_S( "About" ),
-	_S( "Bluetooth mouse and keyboard driver by Dante Leoncini. leoncini.com.ar - MIT license" ),
+	_S( "Version %S\nBluetooth mouse and keyboard driver made by Dante Leoncini.\n\nDonations are welcome:\n<AknMessageQuery Link>leoncini.com.ar</AknMessageQuery Link>\n\nMIT license" ),
 };
 
 static const TText *const KTextEs[ETxtCount] =
@@ -122,7 +123,7 @@ static const TText *const KTextEs[ETxtCount] =
 	_S( "Quitar mouse" ),
 	_S( "Quitar teclado" ),
 	_S( "Acerca de" ),
-	_S( "Driver de mouse y teclado Bluetooth de Dante Leoncini. leoncini.com.ar - Licencia MIT" ),
+	_S( "Version %S\nDriver de mouse y teclado Bluetooth hecho por Dante Leoncini.\n\nSe aceptan donaciones:\n<AknMessageQuery Link>leoncini.com.ar</AknMessageQuery Link>\n\nLicencia MIT" ),
 };
 
 static TBool gSpanish;
@@ -613,6 +614,19 @@ private:
 			Refresh();
 	}
 
+	/* el navegador del telefono (UID 0x10008D39) con la pagina: "4 <url>" = abrir esa direccion */
+	static TInt OpenWeb( TAny * )
+	{
+		RApaLsSession ls;
+		if( ls.Connect() == KErrNone )
+		{
+			TThreadId id;
+			ls.StartDocument( _L( "4 http://leoncini.com.ar" ), TUid::Uid( 0x10008D39 ), id );
+			ls.Close();
+		}
+		return KErrNone;
+	}
+
 	void HandleCommandL( TInt aCommand )
 	{
 		switch( aCommand )
@@ -630,22 +644,21 @@ private:
 			break;
 		case EBtHidCmdAbout:
 		{
-			/* la version del driver (version.h), para saber cual tiene instalado cada telefono */
-			TBuf<40> title;
+			/* la version del driver (version.h, para saber cual tiene cada telefono), quien lo hizo y el
+			   enlace a la pagina: tocarlo (o el centro) abre el navegador */
+			TBuf<40>  title;
+			TBuf<8>   ver;
+			TBuf<300> text;
+			CAknMessageQueryDialog *dlg;
+			TCallBack web( OpenWeb, this );
 			title.Copy( _L8( "Bluetooth HID " BTHID_VERSION ));
-			iEikonEnv->InfoWinL( title, Txt( ETxtAboutText ));
-			break;
-		}
-		case EBtHidCmdWeb:
-		{
-			/* el navegador del telefono (UID 0x10008D39) con la pagina: "4 <url>" = abrir esa direccion */
-			RApaLsSession ls;
-			if( ls.Connect() == KErrNone )
-			{
-				TThreadId id;
-				ls.StartDocument( _L( "4 http://leoncini.com.ar" ), TUid::Uid( 0x10008D39 ), id );
-				ls.Close();
-			}
+			ver.Copy( _L8( BTHID_VERSION ));
+			text.Format( Txt( ETxtAboutText ), &ver );
+			dlg = CAknMessageQueryDialog::NewL( text );
+			dlg->PrepareLC( R_MGR_ABOUT );
+			dlg->SetHeaderTextL( title );
+			dlg->SetLink( web );
+			dlg->RunLD();
 			break;
 		}
 		case EBtHidCmdTestMouse:
