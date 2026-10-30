@@ -50,9 +50,11 @@ RESOURCE MENU_PANE r_mgr_menu
 	{
 		MENU_ITEM { command = EBtHidCmdPickMouse;      txt = "Choose mouse"; },
 		MENU_ITEM { command = EBtHidCmdPickKeyboard;   txt = "Choose keyboard"; },
+		MENU_ITEM { command = EBtHidCmdPickPad;        txt = "Add controller"; },
 		MENU_ITEM { command = EBtHidCmdTests;          txt = "Tests"; cascade = r_mgr_tests_menu; },
 		MENU_ITEM { command = EBtHidCmdForgetMouse;    txt = "Remove mouse"; },
 		MENU_ITEM { command = EBtHidCmdForgetKeyboard; txt = "Remove keyboard"; },
+		MENU_ITEM { command = EBtHidCmdForgetPads;     txt = "Remove controllers"; },
 		MENU_ITEM { command = EBtHidCmdPs3;            txt = "PS3 controller"; },
 		MENU_ITEM { command = EBtHidCmdAbout;          txt = "About"; },
 		MENU_ITEM { command = EAknCmdExit;             txt = "Exit"; }
@@ -64,7 +66,8 @@ RESOURCE MENU_PANE r_mgr_tests_menu
 	items =
 	{
 		MENU_ITEM { command = EBtHidCmdTestMouse; txt = "Test mouse"; },
-		MENU_ITEM { command = EBtHidCmdTestKeys;  txt = "Test keyboard"; }
+		MENU_ITEM { command = EBtHidCmdTestKeys;  txt = "Test keyboard"; },
+		MENU_ITEM { command = EBtHidCmdTestPads;  txt = "Test controllers"; }
 	};
 }
 

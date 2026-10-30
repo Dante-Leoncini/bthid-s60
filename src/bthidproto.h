@@ -21,7 +21,9 @@ enum TBtHidOpcode
 	EBtHidCancelSearch,
 	EBtHidForgetAll,
 	EBtHidStatus,       // arg0 = TBtHidStatusPckg
-	EBtHidForget        // arg0 = tipo
+	EBtHidForget,       // arg0 = tipo
+	EBtHidPadState,     // arg0 = joystick (0-3), arg1 = TBtHidPadStatePckg
+	EBtHidPadRumble     // arg0 = joystick, arg1 = prendida
 };
 
 // arranca bthidhostsrv.exe y espera a que este listo (si ya corre, devuelve KErrNone igual)

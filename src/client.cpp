@@ -150,4 +150,14 @@ EXPORT_C TInt RBtHidManager::Status( TBtHidStatusPckg &aStatus )
 	return SendReceive( EBtHidStatus, TIpcArgs( &aStatus ));
 }
 
+EXPORT_C TInt RBtHidManager::PadState( TInt aPad, TBtHidPadStatePckg &aState )
+{
+	return SendReceive( EBtHidPadState, TIpcArgs( aPad, &aState ));
+}
+
+EXPORT_C TInt RBtHidManager::SetPadRumble( TInt aPad, TBool aOn )
+{
+	return SendReceive( EBtHidPadRumble, TIpcArgs( aPad, aOn ));
+}
+
 #endif // BTHID_HINKKA_COMPAT

@@ -49,6 +49,7 @@ enum TTextId
 	ETxtMouseHelp1, ETxtMouseHelp2, ETxtMouseSize, ETxtKeysHelp, ETxtKeysHeld, ETxtDown, ETxtUp, ETxtNoEvents,
 	ETxtWaiting, ETxtNone, ETxtMenuPickMouse, ETxtMenuPickKeys, ETxtMenuForgetMouse, ETxtMenuForgetKeys,
 	ETxtMenuAbout, ETxtAboutText, ETxtMenuPs3, ETxtPs3Text, ETxtPs3NoAddr,
+	ETxtMenuPickPad, ETxtMenuForgetPads, ETxtMenuTestPads, ETxtPad, ETxtPadNone, ETxtPadHelp, ETxtPadRumble,
 	ETxtCount
 };
 
@@ -92,6 +93,13 @@ static const TText *const KTextEn[ETxtCount] =
 	_S( "PS3 controller" ),
 	_S( "This phone's Bluetooth address:\n%S\n\nWrite it to the PS3 controller by USB from a computer, with ds3pair (github.com/Dante-Leoncini/bthid-s60, tools/PS3.md). Then unplug it and press PS." ),
 	_S( "(turn Bluetooth on and try again)" ),
+	_S( "Add controller" ),
+	_S( "Remove controllers" ),
+	_S( "Test controllers" ),
+	_S( "Controller %d" ),
+	_S( "none (Options > Add controller)" ),
+	_S( "Left/right: controller. Center: vibration" ),
+	_S( "Vibration: %S" ),
 };
 
 static const TText *const KTextEs[ETxtCount] =
@@ -134,6 +142,13 @@ static const TText *const KTextEs[ETxtCount] =
 	_S( "Joystick de PS3" ),
 	_S( "Direcci\x00f3n Bluetooth de este tel\x00e9\x0066ono:\n%S\n\nGrabala en el joystick de PS3 por USB desde una computadora, con ds3pair (github.com/Dante-Leoncini/bthid-s60, tools/PS3.md). Despu\x00e9s desenchufalo y apret\x00e1 PS." ),
 	_S( "(prend\x00e9 el Bluetooth y prob\x00e1 de nuevo)" ),
+	_S( "Agregar joystick" ),
+	_S( "Quitar joysticks" ),
+	_S( "Probar joysticks" ),
+	_S( "Joystick %d" ),
+	_S( "ninguno (Opciones > Agregar joystick)" ),
+	_S( "Izquierda/derecha: joystick. Centro: vibraci\x00f3n" ),
+	_S( "Vibraci\x00f3n: %S" ),
 };
 
 static TBool gSpanish;
@@ -201,13 +216,14 @@ static void UsageName( TInt aUsage, TDes &aName )
 
 /* ------------------------------------------------------------------ */
 
-enum TMgrMode { EModeStatus, EModeMouse, EModeKeys };
+enum TMgrMode { EModeStatus, EModeMouse, EModeKeys, EModePads };
 
 class CMgrView : public CCoeControl
 {
 public:
 	~CMgrView()
 	{
+		delete iPadTimer;
 		delete iCursor;
 		delete iCursorMask;
 		delete iKeyLines;
@@ -224,12 +240,63 @@ public:
 	}
 
 	void SetLines( const CDesCArray *aLines ) { iLines = aLines; if( iMode == EModeStatus ) DrawDeferred(); }
+	void SetManager( RBtHidManager *aMgr ) { iMgr = aMgr; }
+
+	/* prueba de los joysticks: el estado se pide 20 veces por segundo (no llegan como eventos) */
+	static TInt PadTick( TAny *aPtr )
+	{
+		CMgrView *self = static_cast<CMgrView *>( aPtr );
+		TUint now = User::NTickCount();
+		if( self->iMgr )
+			self->iMgr->PadState( self->iPad, self->iPadSt );
+		if( now - self->iPadRateTick >= 1000 )
+		{
+			self->iPadRate = self->iPadSt().iReports - self->iPadRateBase;
+			if( self->iPadRate < 0 ) self->iPadRate = 0;
+			self->iPadRateBase = self->iPadSt().iReports;
+			self->iPadRateTick = now;
+		}
+		self->DrawDeferred();
+		return 1;
+	}
+
+	TKeyResponse OfferKeyEventL( const TKeyEvent &aKey, TEventCode aType )
+	{
+		if( iMode != EModePads || aType != EEventKey )
+			return EKeyWasNotConsumed;
+		if( aKey.iCode == EKeyLeftArrow || aKey.iCode == EKeyRightArrow )
+		{
+			iPad = ( iPad + ( aKey.iCode == EKeyRightArrow ? 1 : EBtHidMaxPads - 1 )) % EBtHidMaxPads;
+			Mem::FillZ( &iPadSt(), sizeof( TBtHidPadState ));
+			iPadRateBase = 0;
+			DrawDeferred();
+			return EKeyWasConsumed;
+		}
+		if( aKey.iCode == EKeyDevice3 || aKey.iCode == EKeyEnter || aKey.iCode == EKeyOK )
+		{
+			if( iMgr )
+				iMgr->SetPadRumble( iPad, !iPadSt().iRumble );
+			return EKeyWasConsumed;
+		}
+		return EKeyWasNotConsumed;
+	}
 	void SetEventError( TInt aErr ) { iEventErr = aErr; }
 
 	void SetMode( TMgrMode aMode )
 	{
 		iMode = aMode;
 		ResetTests();
+		if( aMode == EModePads && !iPadTimer )
+		{
+			TRAP_IGNORE( iPadTimer = CPeriodic::NewL( CActive::EPriorityStandard ));
+			if( iPadTimer )
+				iPadTimer->Start( 0, 50000, TCallBack( PadTick, this ));
+		}
+		else if( aMode != EModePads && iPadTimer )
+		{
+			delete iPadTimer;
+			iPadTimer = NULL;
+		}
 		DrawNow();
 	}
 	TMgrMode Mode() const { return iMode; }
@@ -375,6 +442,8 @@ private:
 			DrawMouseTest( gc, font );
 		else if( iMode == EModeKeys )
 			DrawKeysTest( gc, font );
+		else if( iMode == EModePads )
+			DrawPadsTest( gc, font );
 		else
 			DrawLines( gc, font, iLines, font->AscentInPixels() + 3 );
 		gc.DiscardFont();
@@ -438,6 +507,128 @@ private:
 			gc.BitBltMasked( iPos, iCursor, TRect( TSize( KCursorWidth, KCursorHeight )), iCursorMask, EFalse );
 	}
 
+	/* la prueba de los joysticks: pestanas 1-4, el estado, los botones, los dos sticks y la presion */
+	void DrawPadsTest( CWindowGc &gc, const CFont *font ) const
+	{
+		static const TText *const kNames[EBtHidPadButtons] = { _S( "Ar" ), _S( "De" ), _S( "Ab" ), _S( "Iz" ),
+			_S( "X" ), _S( "O" ), _S( "Cu" ), _S( "Tr" ), _S( "L1" ), _S( "R1" ), _S( "L2" ), _S( "R2" ),
+			_S( "Se" ), _S( "St" ), _S( "L3" ), _S( "R3" ), _S( "PS" ) };
+		const TBtHidPadState &st = iPadSt();
+		TRect    r = Rect();
+		TInt     lh = font->HeightInPixels() + 2, y = 2, i;
+		TBuf<80> text;
+
+		/* pestanas */
+		for( i = 0; i < EBtHidMaxPads; i++ )
+		{
+			TRect tab( TPoint( 4 + i * 34, y ), TSize( 30, lh ));
+			gc.SetBrushStyle( i == iPad ? CGraphicsContext::ESolidBrush : CGraphicsContext::ENullBrush );
+			gc.SetBrushColor( TRgb( 30, 110, 220 ));
+			gc.SetPenColor( KRgbBlack );
+			gc.DrawRect( tab );
+			gc.SetPenColor( i == iPad ? KRgbWhite : KRgbBlack );
+			text.Num( i + 1 );
+			gc.DrawText( text, TPoint( tab.iTl.iX + 11, tab.iTl.iY + font->AscentInPixels() + 1 ));
+		}
+		gc.SetBrushStyle( CGraphicsContext::ENullBrush );
+		gc.SetPenColor( KRgbBlack );
+		y += lh + font->AscentInPixels() + 2;
+
+		/* estado */
+		text.Format( Txt( ETxtPad ), iPad + 1 );
+		if( st.iKind == EBtHidPadNone )
+		{
+			TPtrC none = Txt( ETxtPadNone );
+			text.Append( _L( ": " ));
+			text.Append( none );
+		}
+		else
+		{
+			text.Append( st.iKind == EBtHidPadPs3 ? _L( ", PS3" ) : st.iKind == EBtHidPadPs4 ? _L( ", PS4" ) : _L( "" ));
+			text.Append( st.iState == EBtHidConnected ? Txt( ETxtConnected ) : st.iState == EBtHidWaiting
+				? Txt( ETxtWaiting ) : Txt( ETxtConnecting ));
+		}
+		gc.DrawText( text, TPoint( 4, y ));
+		y += lh;
+		text.Format( _L( "%d rep/s  %02x:%02x:%02x:%02x:%02x:%02x" ), iPadRate,
+			st.iAddr[0], st.iAddr[1], st.iAddr[2], st.iAddr[3], st.iAddr[4], st.iAddr[5] );
+		gc.DrawText( text, TPoint( 4, y ));
+		y += lh;
+		{
+			TPtrC onoff( st.iRumble ? ( gSpanish ? _L( "si" ) : _L( "on" )) : _L( "no" ));
+			text.Format( Txt( ETxtPadRumble ), &onoff );
+		}
+		gc.DrawText( text, TPoint( 4, y ));
+		y += lh - font->AscentInPixels() + 2;
+
+		/* botones: 9 por fila */
+		for( i = 0; i < EBtHidPadButtons; i++ )
+		{
+			TInt  col = i % 9, row = i / 9, w = ( r.Width() - 8 ) / 9;
+			TRect b( TPoint( 4 + col * w, y + row * ( lh + 2 )), TSize( w - 2, lh ));
+			TBool on = ( st.iButtons & ( 1u << i )) != 0;
+			gc.SetBrushStyle( on ? CGraphicsContext::ESolidBrush : CGraphicsContext::ENullBrush );
+			gc.SetBrushColor( KRgbRed );
+			gc.SetPenColor( KRgbBlack );
+			gc.DrawRect( b );
+			gc.SetBrushStyle( CGraphicsContext::ENullBrush );
+			gc.DrawText( TPtrC( kNames[i] ), TPoint( b.iTl.iX + 2, b.iTl.iY + font->AscentInPixels() + 1 ));
+		}
+		y += 2 * ( lh + 2 ) + 4;
+
+		/* sticks: dos circulos con el punto donde esta cada uno */
+		{
+			TInt rad = ( r.Width() - 24 ) / 4;
+			if( rad > 40 ) rad = 40;
+			for( i = 0; i < 2; i++ )
+			{
+				TPoint c( r.Width() / 4 + i * r.Width() / 2, y + rad );
+				TInt   dx = ( st.iAxis[i * 2] - 128 ) * rad / 128, dy = ( st.iAxis[i * 2 + 1] - 128 ) * rad / 128;
+				gc.SetPenColor( KRgbBlack );
+				gc.DrawEllipse( TRect( c - TPoint( rad, rad ), TSize( rad * 2, rad * 2 )));
+				gc.SetBrushStyle( CGraphicsContext::ESolidBrush );
+				gc.SetBrushColor( TRgb( 30, 110, 220 ));
+				gc.DrawEllipse( TRect( c + TPoint( dx - 5, dy - 5 ), TSize( 10, 10 )));
+				gc.SetBrushStyle( CGraphicsContext::ENullBrush );
+			}
+			y += rad * 2 + 6;
+		}
+
+		/* presion: L2 y R2 anchas; con el DualShock 3, ademas la de los otros botones */
+		for( i = 0; i < 2; i++ )
+		{
+			TInt  v = st.iPressure[i ? EBtHidPadR2 : EBtHidPadL2];
+			TInt  w = r.Width() / 2 - 32;
+			TRect bar( TPoint( 28 + i * r.Width() / 2, y ), TSize( w, lh - 4 ));
+			gc.DrawText( i ? _L( "R2" ) : _L( "L2" ), TPoint( 4 + i * r.Width() / 2, y + font->AscentInPixels()));
+			gc.DrawRect( bar );
+			gc.SetBrushStyle( CGraphicsContext::ESolidBrush );
+			gc.SetBrushColor( KRgbRed );
+			gc.DrawRect( TRect( bar.iTl, TSize( v * w / 255, bar.Height())));
+			gc.SetBrushStyle( CGraphicsContext::ENullBrush );
+		}
+		y += lh + 2;
+		if( st.iKind == EBtHidPadPs3 )
+		{
+			static const TUint8 order[12] = { EBtHidPadUp, EBtHidPadRight, EBtHidPadDown, EBtHidPadLeft,
+				EBtHidPadL1, EBtHidPadR1, EBtHidPadTriangle, EBtHidPadCircle, EBtHidPadCross, EBtHidPadSquare,
+				EBtHidPadL2, EBtHidPadR2 };
+			TInt w = ( r.Width() - 8 ) / 12, h = 30;
+			for( i = 0; i < 12; i++ )
+			{
+				TInt  v = st.iPressure[order[i]];
+				TRect bar( TPoint( 4 + i * w, y ), TSize( w - 3, h ));
+				gc.DrawRect( bar );
+				gc.SetBrushStyle( CGraphicsContext::ESolidBrush );
+				gc.SetBrushColor( KRgbRed );
+				gc.DrawRect( TRect( TPoint( bar.iTl.iX, bar.iBr.iY - v * h / 255 ), bar.iBr ));
+				gc.SetBrushStyle( CGraphicsContext::ENullBrush );
+			}
+			y += h + 4;
+		}
+		gc.DrawText( Txt( ETxtPadHelp ), TPoint( 4, r.iBr.iY - font->DescentInPixels() - 2 ));
+	}
+
 	void DrawKeysTest( CWindowGc &gc, const CFont *font ) const
 	{
 		static const TText *const kMods[8] = { _S( "Ctrl " ), _S( "Shift " ), _S( "Alt " ), _S( "Win " ),
@@ -478,6 +669,12 @@ private:
 	}
 
 	TMgrMode          iMode;
+	RBtHidManager    *iMgr;
+	CPeriodic        *iPadTimer;
+	TInt              iPad;          // el joystick que se mira (0-3)
+	TBtHidPadStatePckg iPadSt;
+	TInt              iPadRate, iPadRateBase;
+	TUint             iPadRateTick;
 	const CDesCArray *iLines;
 	TInt              iEventErr;
 	TInt              iEvents;
@@ -584,6 +781,7 @@ public:
 		iView->ConstructL( ClientRect());
 		AddToStackL( iView );
 		iConnectErr = iMgr.Connect();
+		iView->SetManager( iConnectErr == KErrNone ? &iMgr : NULL );
 		iSearch = new( ELeave ) CSearch( iMgr, *this );
 		iEvents = new( ELeave ) CEvents( *iView );
 		iView->SetEventError( iEvents->Start());
@@ -614,6 +812,8 @@ private:
 		{
 			aMenuPane->SetItemTextL( EBtHidCmdPickMouse, Txt( ETxtMenuPickMouse ));
 			aMenuPane->SetItemTextL( EBtHidCmdPickKeyboard, Txt( ETxtMenuPickKeys ));
+			aMenuPane->SetItemTextL( EBtHidCmdPickPad, Txt( ETxtMenuPickPad ));
+			aMenuPane->SetItemTextL( EBtHidCmdForgetPads, Txt( ETxtMenuForgetPads ));
 			aMenuPane->SetItemTextL( EBtHidCmdTests, Txt( ETxtMenuTests ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetMouse, Txt( ETxtMenuForgetMouse ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetKeyboard, Txt( ETxtMenuForgetKeys ));
@@ -625,6 +825,7 @@ private:
 		{
 			aMenuPane->SetItemTextL( EBtHidCmdTestMouse, Txt( ETxtMenuTestMouse ));
 			aMenuPane->SetItemTextL( EBtHidCmdTestKeys, Txt( ETxtMenuTestKeys ));
+			aMenuPane->SetItemTextL( EBtHidCmdTestPads, Txt( ETxtMenuTestPads ));
 		}
 	}
 
@@ -706,6 +907,18 @@ private:
 			break;
 		case EBtHidCmdTestKeys:
 			SetMode( EModeKeys );
+			break;
+		case EBtHidCmdTestPads:
+			SetMode( EModePads );
+			break;
+		case EBtHidCmdPickPad:
+			if( iConnectErr == KErrNone )
+				iSearch->Start( EBtHidGamepad );
+			break;
+		case EBtHidCmdForgetPads:
+			if( iConnectErr == KErrNone )
+				iMgr.Forget( EBtHidGamepad );
+			Refresh();
 			break;
 		case EBtHidCmdForget:
 			if( iConnectErr == KErrNone )
@@ -801,6 +1014,23 @@ void CMgrAppUi::Refresh()
 		{
 			line.Format( Txt( ETxtNotConnected ), d->iError );
 			AddLine( line );
+		}
+	}
+	{
+		TInt pad = 0;
+		for( i = 0; i < st().iCount; i++ )
+		{
+			const TBtHidDeviceInfo *d = &st().iDevice[i];
+			if( d->iType != EBtHidGamepad )
+				continue;
+			TBuf<32> name, kind;
+			kind.Format( Txt( ETxtPad ), ++pad );
+			name.Copy( d->iName );
+			if( !name.Length())
+				name.Format( _L( "%02x:%02x:%02x:%02x:%02x:%02x" ), d->iAddr[0], d->iAddr[1], d->iAddr[2], d->iAddr[3], d->iAddr[4], d->iAddr[5] );
+			line.Format( _L( "%S: %S" ), &kind, &name );
+			AddLine( line );
+			AddLine( d->iState == EBtHidConnected ? Txt( ETxtConnected ) : d->iState == EBtHidWaiting ? Txt( ETxtWaiting ) : Txt( ETxtConnecting ));
 		}
 	}
 	line.Format( Txt( ETxtApps ), st().iClients );

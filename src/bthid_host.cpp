@@ -141,6 +141,9 @@ public:
 	TInt Error() const { return iError; }
 	const TDesC8 &Descriptor() const { return iDesc; }
 	void DescriptorDone( TInt aError, const TDesC8 &aDesc, TInt aFlags );
+	// joystick: estado, vibracion
+	void PadState( TBtHidPadState &aState ) const;
+	void SetRumble( TBool aOn );
 
 private:
 	enum TState { EIdle, EConnCtrl, EConnIntr, ESetProto, EReading, EWaitRetry, EWaitIntr, EWaitDevice };
@@ -154,6 +157,8 @@ private:
 	void Retry( TInt aErr );
 	void ReleaseAll();
 	void Report( const TDesC8 &aData );
+	void PadReport( const TDesC8 &aData );
+	void PadOutput();
 	TBool LayoutReport( const TDesC8 &aData );
 	void BootReport( const TDesC8 &aData );
 	void KeyboardState( TUint8 aMods, const TUint8 *aKeys );
@@ -170,7 +175,7 @@ private:
 	TBool       iCtrlOpen, iIntrOpen;
 	TBool       iTimerOpen;
 	RTimer      iTimer;
-	TBuf8<64>   iBuf;
+	TBuf8<100>  iBuf;            // (el reporte completo del DualShock 4 son 79 bytes)
 	TBuf8<1>    iCmd;
 	TBool       iConnected;
 	TInt        iFails;
@@ -190,6 +195,15 @@ private:
 	TInt        iOtherLogged;    // para el log: reportes que no son de movimiento
 	TInt        iLastBtnByte;    // para el log: cambios del byte de botones
 	TInt        iBtnLogged;
+	// joystick
+	TBuf8<8>    iPadCmd;         // el SET_REPORT que lo activa (DualShock 3)
+	TBuf8<80>   iPadOut;         // luces y vibracion
+	TInt        iPadKind;        // TBtHidPadKind, segun el formato de los reportes
+	TUint32     iPadButtons;
+	TUint8      iPadAxis[4];
+	TUint8      iPadPressure[EBtHidPadButtons];
+	TBool       iPadRumble;
+	TInt        iPadReports;
 };
 
 void CBtHidSdp::Finish( TInt aError )
@@ -230,7 +244,8 @@ void CBtHidDevice::Log( const char *aWhat, TInt aErr )
 
 	iAddr.GetReadable( readable );
 	addr.Copy( readable );
-	msg.Format( _L8( "%s %S %s (%d)" ), iType == EBtHidKeyboard ? "teclado" : "mouse", &addr, aWhat, aErr );
+	msg.Format( _L8( "%s %S %s (%d)" ), iType == EBtHidKeyboard ? "teclado" : iType == EBtHidGamepad ? "joystick" : "mouse",
+		&addr, aWhat, aErr );
 	iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
 }
 
@@ -390,7 +405,10 @@ void CBtHidDevice::RunL()
 		iFails = 0;
 		iError = KErrNone;
 		iRawLogged = 0;
-		Log( iProtoBoot ? "conectado (protocolo boot)" : "conectado (reportes del descriptor)", err );
+		Log( iType == EBtHidGamepad ? "conectado" : iProtoBoot ? "conectado (protocolo boot)" : "conectado (reportes del descriptor)", err );
+		iPadReports = 0;
+		if( iType == EBtHidGamepad )
+			PadOutput(); // la luz de su numero
 		LogDescriptor();
 		iState = EReading;
 		iIntr.Recv( iBuf, 0, iStatus );
@@ -410,6 +428,18 @@ void CBtHidDevice::RunL()
 
 void CBtHidDevice::SetProtocol()
 {
+	if( iType == EBtHidGamepad )
+	{
+		/* joystick: sin SET_PROTOCOL (el boot es de mouse y teclado). El DualShock 3 no manda nada hasta que
+		   se lo activa con el feature 0xF4; al DualShock 4 y los genericos de PS4 no les hace nada */
+		static const TUint8 enable[6] = { 0x53, 0xF4, 0x42, 0x03, 0x00, 0x00 };
+		iProtoBoot = EFalse;
+		iPadCmd.Copy( enable, sizeof( enable ));
+		iState = ESetProto;
+		iCtrl.Write( iPadCmd, iStatus );
+		SetActive();
+		return;
+	}
 	iProtoBoot = !iLayout.iValid;
 	iCmd.SetLength( 1 );
 	iCmd[0] = iProtoBoot ? KHidpSetProtoBoot : KHidpSetProtoReport;
@@ -449,7 +479,7 @@ void CBtHidDevice::AdoptIntr( RSocket &aSock )
 	iIntrOpen = ETrue;
 	// cuando llama el dispositivo ya arranca en modo reportes (el que describe el descriptor): mandarle
 	// SET_PROTOCOL ahi cortaba la conexion (-18). Solo si no tenemos descriptor le pedimos boot
-	if( iCtrlOpen && !iLayout.iValid )
+	if( iCtrlOpen && ( !iLayout.iValid || iType == EBtHidGamepad ))
 	{
 		SetProtocol();
 		return;
@@ -592,6 +622,11 @@ void CBtHidDevice::Report( const TDesC8 &aData )
 	}
 	if( aData.Length() < 2 || aData[0] != KHidpDataInput )
 		return;
+	if( iType == EBtHidGamepad )
+	{
+		PadReport( aData );
+		return;
+	}
 	if( iLayout.iValid && LayoutReport( aData ))
 		return;
 	if( iLayout.iValid && !iProtoBoot )
@@ -723,6 +758,225 @@ void CBtHidDevice::KeyboardState( TUint8 aMods, const TUint8 *aKeys )
 /* ------------------------------------------------------------------ */
 
 /* escucha un canal HID (control o datos) para las conexiones que inicia el dispositivo */
+/* ---------------------------------------------------------------- joysticks
+   Reportes (canal de datos, A1 = DATA | INPUT):
+     DualShock 3:  A1 01 + 48 bytes. [3] select L3 R3 start arriba derecha abajo izquierda, [4] L2 R2 L1 R1 triangulo
+                   circulo cruz cuadrado, [5] bit 0 PS, [7..10] LX LY RX RY, [15..26] la presion de arriba, derecha,
+                   abajo, izquierda, L2, R2, L1, R1, triangulo, circulo, cruz, cuadrado.
+     DualShock 4 y genericos de PS4, el corto: A1 01 + 9 bytes. [2..5] LX LY RX RY, [6] la cruceta en los 4 bits
+                   bajos (0 = arriba y sigue en sentido horario, 8 = suelta) y cuadrado cruz circulo triangulo en los
+                   altos, [7] L1 R1 L2 R2 share options L3 R3, [8] bit 0 PS, [9] [10] la presion de L2 y R2.
+     DualShock 4, el completo: A1 11 C0 00 + lo mismo desde el stick izquierdo. */
+static void PadDpad( TUint32 &aButtons, TInt aHat )
+{
+	static const TUint8 dirs[8] = { 1, 3, 2, 6, 4, 12, 8, 9 }; // bits arriba(1) derecha(2) abajo(4) izquierda(8)
+	if( aHat < 0 || aHat > 7 )
+		return;
+	if( dirs[aHat] & 1 ) aButtons |= 1 << EBtHidPadUp;
+	if( dirs[aHat] & 2 ) aButtons |= 1 << EBtHidPadRight;
+	if( dirs[aHat] & 4 ) aButtons |= 1 << EBtHidPadDown;
+	if( dirs[aHat] & 8 ) aButtons |= 1 << EBtHidPadLeft;
+}
+
+void CBtHidDevice::PadReport( const TDesC8 &aData )
+{
+	TUint32 b = 0;
+	TInt    i, kind = iPadKind;
+	const TUint8 *p = aData.Ptr();
+	TInt    n = aData.Length();
+
+	if( n >= 27 && p[1] == 0x01 && n > 11 )
+	{
+		/* DualShock 3 */
+		static const TUint8 bits1[8] = { EBtHidPadSelect, EBtHidPadL3, EBtHidPadR3, EBtHidPadStart,
+			EBtHidPadUp, EBtHidPadRight, EBtHidPadDown, EBtHidPadLeft };
+		static const TUint8 bits2[8] = { EBtHidPadL2, EBtHidPadR2, EBtHidPadL1, EBtHidPadR1,
+			EBtHidPadTriangle, EBtHidPadCircle, EBtHidPadCross, EBtHidPadSquare };
+		static const TUint8 press[12] = { EBtHidPadUp, EBtHidPadRight, EBtHidPadDown, EBtHidPadLeft,
+			EBtHidPadL2, EBtHidPadR2, EBtHidPadL1, EBtHidPadR1, EBtHidPadTriangle, EBtHidPadCircle,
+			EBtHidPadCross, EBtHidPadSquare };
+		iPadKind = EBtHidPadPs3;
+		for( i = 0; i < 8; i++ )
+		{
+			if( p[3] & ( 1 << i )) b |= 1 << bits1[i];
+			if( p[4] & ( 1 << i )) b |= 1 << bits2[i];
+		}
+		if( p[5] & 1 ) b |= 1 << EBtHidPadPS;
+		for( i = 0; i < 4; i++ )
+			iPadAxis[i] = p[7 + i];
+		Mem::FillZ( iPadPressure, sizeof( iPadPressure ));
+		for( i = 0; i < 12; i++ )
+			iPadPressure[press[i]] = p[15 + i];
+	}
+	else
+	{
+		/* DualShock 4: el corto (A1 01, 9 bytes) o el completo (A1 11 C0 00 ...) */
+		const TUint8 *q;
+		if( p[1] == 0x01 && n >= 11 ) q = p + 2;
+		else if( p[1] == 0x11 && n >= 13 ) q = p + 4;
+		else return;
+		iPadKind = EBtHidPadPs4;
+		for( i = 0; i < 4; i++ )
+			iPadAxis[i] = q[i];
+		PadDpad( b, q[4] & 0x0F );
+		if( q[4] & 0x10 ) b |= 1 << EBtHidPadSquare;
+		if( q[4] & 0x20 ) b |= 1 << EBtHidPadCross;
+		if( q[4] & 0x40 ) b |= 1 << EBtHidPadCircle;
+		if( q[4] & 0x80 ) b |= 1 << EBtHidPadTriangle;
+		{
+			static const TUint8 bits[8] = { EBtHidPadL1, EBtHidPadR1, EBtHidPadL2, EBtHidPadR2,
+				EBtHidPadSelect, EBtHidPadStart, EBtHidPadL3, EBtHidPadR3 };
+			for( i = 0; i < 8; i++ )
+				if( q[5] & ( 1 << i )) b |= 1 << bits[i];
+		}
+		if( q[6] & 1 ) b |= 1 << EBtHidPadPS;
+		/* presion: la de L2 y R2 es analogica; los demas, 255 apretado */
+		for( i = 0; i < EBtHidPadButtons; i++ )
+			iPadPressure[i] = ( b & ( 1 << i )) ? 255 : 0;
+		iPadPressure[EBtHidPadL2] = q[7];
+		iPadPressure[EBtHidPadR2] = q[8];
+	}
+
+	if( b != iPadButtons && iBtnLogged < 40 )
+	{
+		TBuf8<48> msg;
+		msg.Format( _L8( "botones %08x" ), b );
+		Log( (const char *)msg.PtrZ(), iPadKind );
+		iBtnLogged++;
+	}
+	iPadButtons = b;
+	iPadReports++;
+	if( iPadKind != kind )
+		PadOutput(); // recien se sabe cual es: su luz (el DualShock 4 la quiere en su formato)
+}
+
+/* CRC32 (el de zip) para el reporte de salida del DualShock 4 por Bluetooth */
+static TUint32 PadCrc32( TUint32 aCrc, const TUint8 *aData, TInt aLen )
+{
+	TInt i, k;
+	aCrc = ~aCrc;
+	for( i = 0; i < aLen; i++ )
+	{
+		aCrc ^= aData[i];
+		for( k = 0; k < 8; k++ )
+			aCrc = ( aCrc >> 1 ) ^ ( 0xEDB88320u & ( 0u - ( aCrc & 1 )));
+	}
+	return ~aCrc;
+}
+
+/* la luz de su numero y la vibracion. DualShock 3: SET_REPORT output por el canal de control. DualShock 4: el
+   reporte 0x11 por el canal de datos, con el color de su numero y el CRC32 al final (lo exige por Bluetooth).
+   Mientras no se sabe cual es (antes del primer reporte) se manda el del 3, que los de PS4 ignoran */
+void CBtHidDevice::PadOutput()
+{
+	static const TUint8 colors[4][3] = { { 0, 0, 64 }, { 64, 0, 0 }, { 0, 64, 0 }, { 64, 0, 32 } };
+	TInt           pad = iHost.PadIndex( this );
+	TRequestStatus st;
+
+	if( !iConnected || !iCtrlOpen || !iIntrOpen )
+		return;
+	if( pad < 0 ) pad = 0;
+	if( pad > 3 ) pad = 3;
+
+	if( iPadKind == EBtHidPadPs4 )
+	{
+		TUint8  r[79];
+		TUint32 crc;
+		Mem::FillZ( r, sizeof( r ));
+		r[0] = 0xA2;               // DATA | OUTPUT
+		r[1] = 0x11;
+		r[2] = 0xC0;               // HID + CRC
+		r[4] = 0x07;               // motores + luz + parpadeo
+		r[7] = iPadRumble ? 0xC0 : 0;  // motor chico
+		r[8] = iPadRumble ? 0xFF : 0;  // motor grande
+		r[9] = colors[pad][0];
+		r[10] = colors[pad][1];
+		r[11] = colors[pad][2];
+		crc = PadCrc32( 0, r, 75 );  // del 0xA2 hasta antes del CRC
+		r[75] = (TUint8)crc;
+		r[76] = (TUint8)( crc >> 8 );
+		r[77] = (TUint8)( crc >> 16 );
+		r[78] = (TUint8)( crc >> 24 );
+		iPadOut.Copy( r, sizeof( r ));
+		iIntr.Write( iPadOut, st );
+	}
+	else
+	{
+		static const TUint8 led[5] = { 0xFF, 0x27, 0x10, 0x00, 0x32 };
+		TUint8 r[50];
+		TInt   i;
+		Mem::FillZ( r, sizeof( r ));
+		r[0] = 0x52;               // SET_REPORT output
+		r[1] = 0x01;
+		r[3] = iPadRumble ? 0xFE : 0;  // motor chico: duracion y prendido
+		r[4] = iPadRumble ? 1 : 0;
+		r[5] = iPadRumble ? 0xFE : 0;  // motor grande: duracion y fuerza
+		r[6] = iPadRumble ? 0xFF : 0;
+		r[11] = (TUint8)( 2 << pad ); // la luz 1..4
+		for( i = 0; i < 4; i++ )
+			Mem::Copy( r + 12 + i * 5, led, 5 );
+		iPadOut.Copy( r, sizeof( r ));
+		iCtrl.Write( iPadOut, st );
+	}
+	User::WaitForRequest( st );
+}
+
+void CBtHidDevice::SetRumble( TBool aOn )
+{
+	iPadRumble = aOn ? ETrue : EFalse;
+	PadOutput();
+	Log( iPadRumble ? "vibracion prendida" : "vibracion apagada", iPadKind );
+}
+
+void CBtHidDevice::PadState( TBtHidPadState &aState ) const
+{
+	aState.iKind = iPadKind ? iPadKind : EBtHidPadUnknown;
+	aState.iState = State();
+	aState.iButtons = iPadButtons;
+	Mem::Copy( aState.iAxis, iPadAxis, sizeof( iPadAxis ));
+	Mem::Copy( aState.iPressure, iPadPressure, sizeof( iPadPressure ));
+	aState.iRumble = iPadRumble;
+	aState.iReports = iPadReports;
+	Mem::Copy( aState.iAddr, iAddr.Des().Ptr(), 6 );
+}
+
+TInt CBtHidHost::PadIndex( const CBtHidDevice *aDev ) const
+{
+	TInt i, n = 0;
+	for( i = 0; i < EMaxDevices; i++ )
+	{
+		if( !iDev[i] || iDev[i]->Type() != EBtHidGamepad )
+			continue;
+		if( iDev[i] == aDev )
+			return n;
+		n++;
+	}
+	return -1;
+}
+
+static CBtHidDevice *FindPad( CBtHidDevice *const *aDev, TInt aCount, TInt aPad )
+{
+	TInt i, n = 0;
+	for( i = 0; i < aCount; i++ )
+		if( aDev[i] && aDev[i]->Type() == EBtHidGamepad && n++ == aPad )
+			return aDev[i];
+	return NULL;
+}
+
+void CBtHidHost::GetPadState( TInt aPad, TBtHidPadState &aState ) const
+{
+	CBtHidDevice *d = FindPad( iDev, EMaxDevices, aPad );
+	if( d )
+		d->PadState( aState );
+}
+
+void CBtHidHost::SetPadRumble( TInt aPad, TBool aOn )
+{
+	CBtHidDevice *d = FindPad( iDev, EMaxDevices, aPad );
+	if( d )
+		d->SetRumble( aOn );
+}
+
 class CBtHidListener : public CActive
 {
 public:
@@ -818,6 +1072,29 @@ void CBtHidHost::Incoming( TUint aPsm, RSocket &aSock, const TBTDevAddr &aAddr )
 			iDev[i]->AdoptIntr( aSock );
 		return;
 	}
+	/* uno que no esta en la lista y llama solo: un joystick de PS3 al que se le grabo la direccion del telefono
+	   (tools/ds3pair.py). Se lo toma como joystick si hay lugar (hasta 4) */
+	if( aPsm == KHidCtrlPsm )
+	{
+		TInt pads = 0, freeSlot = -1;
+		for( i = 0; i < EMaxDevices; i++ )
+		{
+			if( iDev[i] && iDev[i]->Type() == EBtHidGamepad ) pads++;
+			if( !iDev[i] && freeSlot < 0 ) freeSlot = i;
+		}
+		if( pads < EBtHidMaxPads && freeSlot >= 0 )
+		{
+			iObserver.BtHidLog( "llama un joystick que no estaba: lo agrego" );
+			AddDevice( aAddr, EBtHidGamepad, _L8( "PS3" ), KNullDesC8, 0, EFalse );
+			Save();
+			for( i = 0; i < EMaxDevices; i++ )
+				if( iDev[i] && iDev[i]->Addr() == aAddr )
+				{
+					iDev[i]->AdoptCtrl( aSock );
+					return;
+				}
+		}
+	}
 	aSock.Close(); // no es un dispositivo elegido
 	iObserver.BtHidLog( "conexion entrante de un dispositivo no elegido: rechazada" );
 }
@@ -877,7 +1154,7 @@ void CBtHidHost::AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &a
 
 	for( i = 0; i < EMaxDevices; i++ )
 	{
-		if( iDev[i] && ( iDev[i]->Addr() == aAddr || ( aType && iDev[i]->Type() == aType )))
+		if( iDev[i] && ( iDev[i]->Addr() == aAddr || ( aType && aType != EBtHidGamepad && iDev[i]->Type() == aType )))
 		{
 			delete iDev[i];
 			iDev[i] = NULL;
@@ -933,11 +1210,18 @@ void CBtHidHost::RunL()
 	{
 		TBTDeviceClass cls = iResp().DeviceClass();
 		if( cls.MajorDeviceClass() == EMajorDevicePeripheral )
-			type = ( cls.MinorDeviceClass() & EMinorDevicePeripheralKeyboard ) ? EBtHidKeyboard : EBtHidMouse;
+		{
+			TUint minor = cls.MinorDeviceClass();
+			if(( minor & 0x0F ) == EMinorDevicePeripheralJoystick || ( minor & 0x0F ) == EMinorDevicePeripheralGamepad )
+				type = EBtHidGamepad;
+			else
+				type = ( minor & EMinorDevicePeripheralKeyboard ) ? EBtHidKeyboard : EBtHidMouse;
+		}
 	}
 	if( iResp().IsValidDeviceName())
 		name.Copy( iResp().DeviceName().Left( name.MaxLength()));
-	iObserver.BtHidLog( type == EBtHidKeyboard ? "teclado elegido" : type == EBtHidMouse ? "mouse elegido" : "dispositivo elegido" );
+	iObserver.BtHidLog( type == EBtHidKeyboard ? "teclado elegido" : type == EBtHidMouse ? "mouse elegido"
+		: type == EBtHidGamepad ? "joystick elegido" : "dispositivo elegido" );
 	AddDevice( iResp().BDAddr(), type, name, KNullDesC8, 0, ETrue );
 	Save();
 	iObserver.BtHidSearchDone( KErrNone );

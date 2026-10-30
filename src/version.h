@@ -6,6 +6,6 @@ ser mayor que la del "Bluetooth HID support" de Hinkka para instalarse como su a
 #ifndef BTHID_VERSION_H
 #define BTHID_VERSION_H
 
-#define BTHID_VERSION "0.1"
+#define BTHID_VERSION "0.2" // 0.2: joysticks de PS3 y PS4 (y genericos), hasta 4
 
 #endif

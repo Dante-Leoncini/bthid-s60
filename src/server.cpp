@@ -181,6 +181,21 @@ void CBtHidSession::ServiceL( const RMessage2 &aMessage )
 			Server().Host()->Forget( aMessage.Int0());
 		aMessage.Complete( KErrNone );
 		return;
+	case EBtHidPadState:
+		{
+			TBtHidPadStatePckg st;
+			Mem::FillZ( &st(), sizeof( TBtHidPadState ));
+			if( Server().Host())
+				Server().Host()->GetPadState( aMessage.Int0(), st());
+			aMessage.WriteL( 1, st );
+			aMessage.Complete( KErrNone );
+		}
+		return;
+	case EBtHidPadRumble:
+		if( Server().Host())
+			Server().Host()->SetPadRumble( aMessage.Int0(), aMessage.Int1());
+		aMessage.Complete( KErrNone );
+		return;
 	case EBtHidStatus:
 		{
 			TBtHidStatusPckg st;

@@ -8,7 +8,7 @@ Los juegos no necesitan esto: cargan bthidhost.dll y usan la API de siempre (bth
 
 #include <e32base.h>
 
-enum TBtHidDeviceType   { EBtHidUnknown = 0, EBtHidMouse = 1, EBtHidKeyboard = 2 };
+enum TBtHidDeviceType   { EBtHidUnknown = 0, EBtHidMouse = 1, EBtHidKeyboard = 2, EBtHidGamepad = 3 };
 // EBtHidWaiting: el dispositivo se reconecta solo (HIDReconnectInitiate); el telefono no lo llama, lo espera
 enum TBtHidDeviceState  { EBtHidDisconnected = 0, EBtHidConnecting = 1, EBtHidConnected = 2, EBtHidWaiting = 3 };
 
@@ -23,12 +23,37 @@ struct TBtHidDeviceInfo
 
 struct TBtHidStatus
 {
-	enum { EMaxDevices = 2 };
+	enum { EMaxDevices = 6 }; // el mouse, el teclado y hasta 4 joysticks
 	TInt             iCount;
 	TInt             iClients; // apps conectadas que reciben eventos
 	TBtHidDeviceInfo iDevice[EMaxDevices];
 };
 typedef TPckgBuf<TBtHidStatus> TBtHidStatusPckg;
+
+/* joysticks (DualShock 3 y 4 y los genericos que hablan como ellos): hasta 4, numerados por orden */
+enum { EBtHidMaxPads = 4 };
+enum TBtHidPadKind { EBtHidPadNone = 0, EBtHidPadUnknown = 1, EBtHidPadPs3 = 3, EBtHidPadPs4 = 4 };
+enum TBtHidPadButton
+{
+	EBtHidPadUp, EBtHidPadRight, EBtHidPadDown, EBtHidPadLeft,
+	EBtHidPadCross, EBtHidPadCircle, EBtHidPadSquare, EBtHidPadTriangle,
+	EBtHidPadL1, EBtHidPadR1, EBtHidPadL2, EBtHidPadR2,
+	EBtHidPadSelect, EBtHidPadStart, EBtHidPadL3, EBtHidPadR3, EBtHidPadPS,
+	EBtHidPadButtons
+};
+
+struct TBtHidPadState
+{
+	TInt    iKind;                       // TBtHidPadKind (EBtHidPadNone = no hay joystick con ese numero)
+	TInt    iState;                      // TBtHidDeviceState
+	TUint32 iButtons;                    // apretados: bit ( 1 << TBtHidPadButton )
+	TUint8  iAxis[4];                    // LX LY RX RY, 0-255 (128 al centro)
+	TUint8  iPressure[EBtHidPadButtons]; // cuanto se aprieta cada boton (0-255); el DS4 solo lo tiene en L2/R2
+	TInt    iRumble;                     // vibrando
+	TInt    iReports;                    // reportes recibidos desde que se conecto
+	TUint8  iAddr[6];
+};
+typedef TPckgBuf<TBtHidPadState> TBtHidPadStatePckg;
 
 class RBtHidManager : public RSessionBase
 {
@@ -45,6 +70,10 @@ public:
 	// olvidar el mouse o el teclado
 	IMPORT_C TInt Forget( TInt aType );
 	IMPORT_C TInt Status( TBtHidStatusPckg &aStatus );
+	// el joystick aPad (0-3): botones, sticks, presion de cada boton
+	IMPORT_C TInt PadState( TInt aPad, TBtHidPadStatePckg &aState );
+	// prender o apagar la vibracion del joystick aPad
+	IMPORT_C TInt SetPadRumble( TInt aPad, TBool aOn );
 };
 
 #endif // BTHIDMANAGER_H

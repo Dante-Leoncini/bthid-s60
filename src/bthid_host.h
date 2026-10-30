@@ -52,6 +52,10 @@ public:
 	void ForgetAll();
 	void Forget( TInt aType );
 	void GetStatus( TBtHidStatus &aStatus ) const;
+	// joysticks: el numero aPad (0-3) es el orden entre los joysticks guardados
+	void GetPadState( TInt aPad, TBtHidPadState &aState ) const;
+	void SetPadRumble( TInt aPad, TBool aOn );
+	TInt PadIndex( const CBtHidDevice *aDev ) const;
 
 	// conexion entrante (CBtHidListener) en el canal aPsm: la adopta el dispositivo elegido con esa direccion
 	void Incoming( TUint aPsm, RSocket &aSock, const TBTDevAddr &aAddr );

@@ -13,7 +13,10 @@ enum TBtHidMgrCommands
 	EBtHidCmdForgetMouse,
 	EBtHidCmdForgetKeyboard,
 	EBtHidCmdAbout,
-	EBtHidCmdPs3
+	EBtHidCmdPs3,
+	EBtHidCmdPickPad,
+	EBtHidCmdForgetPads,
+	EBtHidCmdTestPads
 };
 
 #endif
