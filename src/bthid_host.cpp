@@ -204,6 +204,12 @@ private:
 	TUint8      iPadPressure[EBtHidPadButtons];
 	TBool       iPadRumble;
 	TInt        iPadReports;
+	TUint8      iPadKeysDown[CBtHidHost::EPadKeyInputs]; // teclas del modo teclado apretadas (usos HID)
+	TInt        iPadKeysCount;
+	TInt        iPadStick;       // el stick izquierdo como flechas (bits arriba derecha abajo izquierda)
+public:
+	void PadKeys();              // el modo teclado: las teclas de lo apretado ahora
+	void ReleasePadKeys();
 };
 
 void CBtHidSdp::Finish( TInt aError )
@@ -273,6 +279,7 @@ void CBtHidDevice::ReleaseAll()
 			iHost.Observer().BtHidKey( iKeys[i], EFalse );
 	iMods = 0;
 	Mem::FillZ( iKeys, sizeof( iKeys ));
+	ReleasePadKeys();
 }
 
 void CBtHidDevice::Start()
@@ -307,7 +314,9 @@ void CBtHidDevice::Start()
    "conectar" en el mouse) */
 void CBtHidDevice::Wait()
 {
-	if( !( iFlags & EFlagReconnSelf ))
+	/* los joysticks genericos dicen que se reconectan solos pero no siempre llaman: tambien los llamamos
+	   (si llaman ellos, la conexion entrante los adopta igual) */
+	if( !( iFlags & EFlagReconnSelf ) || iType == EBtHidGamepad )
 	{
 		StartAfter( 2000000 );
 		return;
@@ -361,7 +370,7 @@ void CBtHidDevice::Retry( TInt aErr )
 		iConnected = EFalse;
 		iFails = 0;
 	}
-	if( iFlags & EFlagReconnSelf )
+	if(( iFlags & EFlagReconnSelf ) && iType != EBtHidGamepad )
 	{
 		iState = EWaitDevice; // se reconecta solo: esperarlo
 		return;
@@ -374,7 +383,12 @@ void CBtHidDevice::Retry( TInt aErr )
 	if( !iTimerOpen )
 		return;
 	// recien cortado el dispositivo esta despierto: volver a llamarlo ya
-	iTimer.After( iStatus, dropped ? 500000 : iFails < 3 ? KRetryFirstUs : iFails < 6 ? KRetryUs : KRetrySlowUs );
+	/* un joystick apagado: se lo sigue llamando cada 8 s un rato (al prenderlo conecta solo) y despues cada 30 s,
+	   para no ocupar la radio todo el tiempo (el mouse llama el y necesita la radio libre) */
+	if( iType == EBtHidGamepad )
+		iTimer.After( iStatus, dropped ? 500000 : iFails < 20 ? KRetryUs : 30000000 );
+	else
+		iTimer.After( iStatus, dropped ? 500000 : iFails < 3 ? KRetryFirstUs : iFails < 6 ? KRetryUs : KRetrySlowUs );
 	SetActive();
 }
 
@@ -846,8 +860,66 @@ void CBtHidDevice::PadReport( const TDesC8 &aData )
 	}
 	iPadButtons = b;
 	iPadReports++;
+	PadKeys();
 	if( iPadKind != kind )
 		PadOutput(); // recien se sabe cual es: su luz (el DualShock 4 la quiere en su formato)
+}
+
+/* modo teclado: las teclas de los botones apretados y del stick izquierdo (como flechas, con un margen para que no
+   titile en el borde). Se mandan solo los cambios; dos botones con la misma tecla cuentan una vez */
+void CBtHidDevice::PadKeys()
+{
+	TUint8 want[CBtHidHost::EPadKeyInputs];
+	TInt   n = 0, i, j, pad;
+
+	if( !iHost.PadKeys())
+	{
+		ReleasePadKeys();
+		return;
+	}
+	pad = iHost.PadIndex( this );
+	if( pad < 0 || pad >= EBtHidMaxPads )
+		return;
+
+	/* el stick: entra a 64/192 y sale a 96/160 */
+	{
+		TInt s = iPadStick, x = iPadAxis[0], y = iPadAxis[1];
+		if( y < 64 ) s |= 1; else if( y > 96 ) s &= ~1;
+		if( x > 192 ) s |= 2; else if( x < 160 ) s &= ~2;
+		if( y > 192 ) s |= 4; else if( y < 160 ) s &= ~4;
+		if( x < 64 ) s |= 8; else if( x > 96 ) s &= ~8;
+		iPadStick = s;
+	}
+	for( i = 0; i < CBtHidHost::EPadKeyInputs; i++ )
+	{
+		TBool on = i < EBtHidPadButtons ? ( iPadButtons & ( 1u << i )) != 0 : ( iPadStick & ( 1 << ( i - EBtHidPadButtons ))) != 0;
+		TInt  k = on ? iHost.PadKey( pad, i ) : 0;
+		if( !k ) continue;
+		for( j = 0; j < n && want[j] != k; j++ ) {}
+		if( j == n ) want[n++] = (TUint8)k;
+	}
+	/* soltar las que ya no estan y apretar las nuevas */
+	for( i = 0; i < iPadKeysCount; i++ )
+	{
+		for( j = 0; j < n && want[j] != iPadKeysDown[i]; j++ ) {}
+		if( j == n ) iHost.Observer().BtHidPadKey( iPadKeysDown[i], EFalse );
+	}
+	for( i = 0; i < n; i++ )
+	{
+		for( j = 0; j < iPadKeysCount && iPadKeysDown[j] != want[i]; j++ ) {}
+		if( j == iPadKeysCount ) iHost.Observer().BtHidPadKey( want[i], ETrue );
+	}
+	Mem::Copy( iPadKeysDown, want, n );
+	iPadKeysCount = n;
+}
+
+void CBtHidDevice::ReleasePadKeys()
+{
+	TInt i;
+	for( i = 0; i < iPadKeysCount; i++ )
+		iHost.Observer().BtHidPadKey( iPadKeysDown[i], EFalse );
+	iPadKeysCount = 0;
+	iPadStick = 0;
 }
 
 /* CRC32 (el de zip) para el reporte de salida del DualShock 4 por Bluetooth */
@@ -938,6 +1010,160 @@ void CBtHidDevice::PadState( TBtHidPadState &aState ) const
 	aState.iRumble = iPadRumble;
 	aState.iReports = iPadReports;
 	Mem::Copy( aState.iAddr, iAddr.Des().Ptr(), 6 );
+}
+
+/* ---------------------------------------------------------------- modo teclado
+   c:\data\bthid_teclas.txt: un renglon "joystick boton tecla". Si no esta, se escribe con estas teclas (para
+   emuladores y juegos retro) y se puede editar. El prendido/apagado se guarda en c:\private\e0d69650\teclas.dat */
+_LIT( KPadKeysFile, "c:\\data\\bthid_teclas.txt" );
+_LIT( KPadKeysOnFile, "c:\\private\\e0d69650\\teclas.dat" );
+_LIT8( KPadKeysDefault,
+	"# Joystick como teclado (Bluetooth HID): que tecla manda cada boton de cada joystick (1 a 4)\r\n"
+	"# Se usa con Opciones > Joystick como teclado: si. Despues de editarlo, apagarlo y prenderlo otra vez.\r\n"
+	"# Renglones: joystick boton tecla\r\n"
+	"# Botones: arriba abajo izquierda derecha cruz circulo cuadrado triangulo l1 r1 l2 r2 select start l3 r3 ps\r\n"
+	"#          stick_arriba stick_abajo stick_izquierda stick_derecha (el stick izquierdo)\r\n"
+	"# Teclas: una letra o un numero, o enter esc espacio tab borrar arriba abajo izquierda derecha ctrl shift alt\r\n"
+	"#         f1 ... f12 inicio fin pgarriba pgabajo insertar suprimir coma punto ninguna\r\n"
+	"1 arriba arriba\r\n1 abajo abajo\r\n1 izquierda izquierda\r\n1 derecha derecha\r\n"
+	"1 stick_arriba arriba\r\n1 stick_abajo abajo\r\n1 stick_izquierda izquierda\r\n1 stick_derecha derecha\r\n"
+	"1 cruz z\r\n1 circulo x\r\n1 cuadrado a\r\n1 triangulo s\r\n1 l1 q\r\n1 r1 w\r\n1 l2 e\r\n1 r2 r\r\n"
+	"1 select espacio\r\n1 start enter\r\n1 l3 1\r\n1 r3 2\r\n1 ps esc\r\n"
+	"2 arriba i\r\n2 abajo k\r\n2 izquierda j\r\n2 derecha l\r\n"
+	"2 stick_arriba i\r\n2 stick_abajo k\r\n2 stick_izquierda j\r\n2 stick_derecha l\r\n"
+	"2 cruz v\r\n2 circulo b\r\n2 cuadrado f\r\n2 triangulo g\r\n2 l1 t\r\n2 r1 y\r\n2 l2 u\r\n2 r2 o\r\n"
+	"2 select n\r\n2 start m\r\n2 l3 3\r\n2 r3 4\r\n2 ps borrar\r\n"
+	"3 arriba 8\r\n3 abajo 2\r\n3 izquierda 4\r\n3 derecha 6\r\n"
+	"3 stick_arriba 8\r\n3 stick_abajo 2\r\n3 stick_izquierda 4\r\n3 stick_derecha 6\r\n"
+	"3 cruz c\r\n3 circulo d\r\n3 cuadrado h\r\n3 triangulo p\r\n3 select 5\r\n3 start 7\r\n"
+	"4 arriba inicio\r\n4 abajo fin\r\n4 izquierda suprimir\r\n4 derecha pgabajo\r\n"
+	"4 stick_arriba inicio\r\n4 stick_abajo fin\r\n4 stick_izquierda suprimir\r\n4 stick_derecha pgabajo\r\n"
+	"4 cruz coma\r\n4 circulo punto\r\n4 cuadrado 9\r\n4 triangulo 0\r\n4 select tab\r\n4 start insertar\r\n" );
+
+static TInt PadInputByName( const TDesC8 &aName )
+{
+	static const char *const names[CBtHidHost::EPadKeyInputs] = { "arriba", "derecha", "abajo", "izquierda",
+		"cruz", "circulo", "cuadrado", "triangulo", "l1", "r1", "l2", "r2", "select", "start", "l3", "r3", "ps",
+		"stick_arriba", "stick_derecha", "stick_abajo", "stick_izquierda" };
+	TInt i;
+	for( i = 0; i < CBtHidHost::EPadKeyInputs; i++ )
+		if( !aName.Compare( TPtrC8( (const TUint8 *)names[i] )))
+			return i;
+	return -1;
+}
+
+/* el uso HID de la pagina de teclado (el mismo que manda un teclado Bluetooth) */
+static TInt PadKeyByName( const TDesC8 &aName )
+{
+	static const struct { const char *name; TUint8 usage; } keys[] = {
+		{ "enter", 40 }, { "esc", 41 }, { "borrar", 42 }, { "tab", 43 }, { "espacio", 44 }, { "menos", 45 },
+		{ "igual", 46 }, { "coma", 54 }, { "punto", 55 }, { "insertar", 73 }, { "inicio", 74 }, { "pgarriba", 75 },
+		{ "suprimir", 76 }, { "fin", 77 }, { "pgabajo", 78 }, { "derecha", 79 }, { "izquierda", 80 }, { "abajo", 81 },
+		{ "arriba", 82 }, { "ctrl", 224 }, { "shift", 225 }, { "alt", 226 }, { "ninguna", 0 } };
+	TInt i;
+	if( aName.Length() == 1 )
+	{
+		TUint c = aName[0];
+		if( c >= 'a' && c <= 'z' ) return 4 + c - 'a';
+		if( c >= '1' && c <= '9' ) return 30 + c - '1';
+		if( c == '0' ) return 39;
+	}
+	if( aName.Length() >= 2 && aName.Length() <= 3 && aName[0] == 'f' )
+	{
+		TLex8 lex( aName.Mid( 1 ));
+		TInt  f;
+		if( lex.Val( f ) == KErrNone && f >= 1 && f <= 12 )
+			return 58 + f - 1;
+	}
+	for( i = 0; i < (TInt)( sizeof( keys ) / sizeof( keys[0] )); i++ )
+		if( !aName.Compare( TPtrC8( (const TUint8 *)keys[i].name )))
+			return keys[i].usage;
+	return -1;
+}
+
+void CBtHidHost::LoadPadKeys()
+{
+	RFs    fs;
+	RFile  f;
+	HBufC8 *buf = NULL;
+	TInt   size = 0;
+
+	Mem::FillZ( iPadKeyMap, sizeof( iPadKeyMap ));
+	if( fs.Connect() != KErrNone )
+		return;
+	if( f.Open( fs, KPadKeysFile, EFileRead ) == KErrNone )
+	{
+		if( f.Size( size ) == KErrNone && size > 0 && size < 16384 && ( buf = HBufC8::New( size )) != NULL )
+		{
+			TPtr8 p = buf->Des();
+			f.Read( p );
+		}
+		f.Close();
+	}
+	else if( f.Replace( fs, KPadKeysFile, EFileWrite ) == KErrNone )
+	{
+		/* la primera vez: el archivo con las teclas de siempre, para poder editarlo */
+		f.Write( KPadKeysDefault );
+		f.Close();
+		buf = KPadKeysDefault().Alloc();
+	}
+	BtHidCloseFs( fs );
+	if( !buf )
+		return;
+
+	TLex8 lines( *buf );
+	while( !lines.Eos())
+	{
+		lines.Mark();
+		while( !lines.Eos() && lines.Peek() != '\n' )
+			lines.Inc();
+		TPtrC8 line = lines.MarkedToken();
+		if( !lines.Eos())
+			lines.Inc();
+		TLex8 w( line );
+		TPtrC8 a = w.NextToken(), b = w.NextToken(), c = w.NextToken();
+		TBuf8<24> bn, cn;
+		TInt pad, in, key;
+		if( !a.Length() || a[0] == '#' || !b.Length() || !c.Length())
+			continue;
+		pad = a[0] - '1';
+		bn.Copy( b.Left( bn.MaxLength()));
+		cn.Copy( c.Left( cn.MaxLength()));
+		bn.LowerCase();
+		cn.LowerCase();
+		in = PadInputByName( bn );
+		key = PadKeyByName( cn );
+		if( pad >= 0 && pad < EBtHidMaxPads && in >= 0 && key >= 0 )
+			iPadKeyMap[pad][in] = (TUint8)key;
+	}
+	delete buf;
+}
+
+void CBtHidHost::SetPadKeys( TBool aOn )
+{
+	RFs   fs;
+	RFile f;
+	TInt  i;
+
+	iPadKeys = aOn ? ETrue : EFalse;
+	if( iPadKeys )
+		LoadPadKeys(); // por si se edito el archivo
+	else
+		for( i = 0; i < EMaxDevices; i++ )
+			if( iDev[i] )
+				iDev[i]->ReleasePadKeys();
+	iObserver.BtHidLog( iPadKeys ? "joysticks como teclado: si" : "joysticks como teclado: no" );
+	if( fs.Connect() == KErrNone )
+	{
+		if( f.Replace( fs, KPadKeysOnFile, EFileWrite ) == KErrNone )
+		{
+			TBuf8<1> b;
+			b.Append( (TUint8)iPadKeys );
+			f.Write( b );
+			f.Close();
+		}
+		BtHidCloseFs( fs );
+	}
 }
 
 TInt CBtHidHost::PadIndex( const CBtHidDevice *aDev ) const
@@ -1119,6 +1345,23 @@ void CBtHidHost::ConstructL( const TDesC &aSaveFile )
 	User::LeaveIfError( iSs.Connect());
 	iFile.Copy( aSaveFile.Left( iFile.MaxLength()));
 	Load();
+	{
+		RFs   fs;
+		RFile f;
+		if( fs.Connect() == KErrNone )
+		{
+			if( f.Open( fs, KPadKeysOnFile, EFileRead ) == KErrNone )
+			{
+				TBuf8<1> b;
+				if( f.Read( b ) == KErrNone && b.Length() && b[0] )
+					iPadKeys = ETrue;
+				f.Close();
+			}
+			BtHidCloseFs( fs );
+		}
+		if( iPadKeys )
+			LoadPadKeys();
+	}
 	iListenCtrl = new( ELeave ) CBtHidListener( *this, KHidCtrlPsm );
 	iListenIntr = new( ELeave ) CBtHidListener( *this, KHidIntrPsm );
 	iListenCtrl->Start();

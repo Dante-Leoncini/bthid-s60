@@ -16,7 +16,8 @@ enum TBtHidMgrCommands
 	EBtHidCmdPs3,
 	EBtHidCmdPickPad,
 	EBtHidCmdForgetPads,
-	EBtHidCmdTestPads
+	EBtHidCmdTestPads,
+	EBtHidCmdPadKeys
 };
 
 #endif

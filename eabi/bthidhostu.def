@@ -9,4 +9,5 @@ EXPORTS
 	_ZN13RBtHidManager6ForgetEi @ 8 NONAME
 	_ZN13RBtHidManager8PadStateEiR8TPckgBufI14TBtHidPadStateE @ 9 NONAME
 	_ZN13RBtHidManager12SetPadRumbleEii @ 10 NONAME
+	_ZN13RBtHidManager10SetPadKeysEi @ 11 NONAME
 

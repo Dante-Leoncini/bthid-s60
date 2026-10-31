@@ -26,6 +26,7 @@ struct TBtHidStatus
 	enum { EMaxDevices = 6 }; // el mouse, el teclado y hasta 4 joysticks
 	TInt             iCount;
 	TInt             iClients; // apps conectadas que reciben eventos
+	TInt             iPadKeys; // los joysticks tambien mandan teclas (modo teclado, para las apps viejas)
 	TBtHidDeviceInfo iDevice[EMaxDevices];
 };
 typedef TPckgBuf<TBtHidStatus> TBtHidStatusPckg;
@@ -74,6 +75,9 @@ public:
 	IMPORT_C TInt PadState( TInt aPad, TBtHidPadStatePckg &aState );
 	// prender o apagar la vibracion del joystick aPad
 	IMPORT_C TInt SetPadRumble( TInt aPad, TBool aOn );
+	// modo teclado: cada boton de los joysticks manda una tecla (c:\data\bthid_teclas.txt) a las apps que usan la
+	// API del hidsrv (bthidclient.h); las que piden el estado del joystick (PadState) no reciben esas teclas
+	IMPORT_C TInt SetPadKeys( TBool aOn );
 };
 
 #endif // BTHIDMANAGER_H

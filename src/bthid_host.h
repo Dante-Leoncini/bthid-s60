@@ -26,6 +26,8 @@ public:
 	virtual void BtHidMouse( TInt aDx, TInt aDy, TInt aWheel, TInt aButtons ) = 0;
 	// tecla apretada/soltada: codigo de uso HID de la pagina de teclado (4 = 'a'...), modificadores 224..231
 	virtual void BtHidKey( TInt aUsage, TBool aDown ) = 0;
+	// la misma tecla, pero de un joystick en modo teclado: no va a las apps que leen el joystick (PadState)
+	virtual void BtHidPadKey( TInt aUsage, TBool aDown ) = 0;
 	// termino el cuadro de busqueda (KErrCancel si no se eligio nada)
 	virtual void BtHidSearchDone( TInt aError ) = 0;
 	// avisos para el log
@@ -56,6 +58,12 @@ public:
 	void GetPadState( TInt aPad, TBtHidPadState &aState ) const;
 	void SetPadRumble( TInt aPad, TBool aOn );
 	TInt PadIndex( const CBtHidDevice *aDev ) const;
+	// modo teclado de los joysticks: prendido, y que tecla (uso HID) manda cada boton (EPadKeyInputs por joystick)
+	enum { EPadKeyInputs = EBtHidPadButtons + 4 }; // los botones y el stick izquierdo (arriba derecha abajo izquierda)
+	void SetPadKeys( TBool aOn );
+	TBool PadKeys() const { return iPadKeys; }
+	TInt PadKey( TInt aPad, TInt aInput ) const { return iPadKeyMap[aPad & 3][aInput]; }
+	void LoadPadKeys();
 
 	// conexion entrante (CBtHidListener) en el canal aPsm: la adopta el dispositivo elegido con esa direccion
 	void Incoming( TUint aPsm, RSocket &aSock, const TBTDevAddr &aAddr );
@@ -84,6 +92,8 @@ private:
 	CBtHidListener               *iListenCtrl, *iListenIntr;
 	TFileName                     iFile;
 	TInt                          iSelectType;
+	TBool                         iPadKeys;
+	TUint8                        iPadKeyMap[EBtHidMaxPads][EPadKeyInputs];
 };
 
 #endif // BTHID_HOST_H

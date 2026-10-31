@@ -50,6 +50,7 @@ enum TTextId
 	ETxtWaiting, ETxtNone, ETxtMenuPickMouse, ETxtMenuPickKeys, ETxtMenuForgetMouse, ETxtMenuForgetKeys,
 	ETxtMenuAbout, ETxtAboutText, ETxtMenuPs3, ETxtPs3Text, ETxtPs3NoAddr,
 	ETxtMenuPickPad, ETxtMenuForgetPads, ETxtMenuTestPads, ETxtPad, ETxtPadNone, ETxtPadHelp, ETxtPadRumble,
+	ETxtMenuPadKeysOn, ETxtMenuPadKeysOff,
 	ETxtCount
 };
 
@@ -100,6 +101,8 @@ static const TText *const KTextEn[ETxtCount] =
 	_S( "none (Options > Add controller)" ),
 	_S( "Left/right: controller. Center: vibration" ),
 	_S( "Vibration: %S" ),
+	_S( "Controllers as keyboard: yes" ),
+	_S( "Controllers as keyboard: no" ),
 };
 
 static const TText *const KTextEs[ETxtCount] =
@@ -149,6 +152,8 @@ static const TText *const KTextEs[ETxtCount] =
 	_S( "ninguno (Opciones > Agregar joystick)" ),
 	_S( "Izquierda/derecha: joystick. Centro: vibraci\x00f3n" ),
 	_S( "Vibraci\x00f3n: %S" ),
+	_S( "Joystick como teclado: s\x00ed" ),
+	_S( "Joystick como teclado: no" ),
 };
 
 static TBool gSpanish;
@@ -814,6 +819,12 @@ private:
 			aMenuPane->SetItemTextL( EBtHidCmdPickKeyboard, Txt( ETxtMenuPickKeys ));
 			aMenuPane->SetItemTextL( EBtHidCmdPickPad, Txt( ETxtMenuPickPad ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetPads, Txt( ETxtMenuForgetPads ));
+			{
+				/* el modo teclado: el texto dice como esta ahora */
+				TBtHidStatusPckg st;
+				TBool on = iConnectErr == KErrNone && iMgr.Status( st ) == KErrNone && st().iPadKeys;
+				aMenuPane->SetItemTextL( EBtHidCmdPadKeys, Txt( on ? ETxtMenuPadKeysOn : ETxtMenuPadKeysOff ));
+			}
 			aMenuPane->SetItemTextL( EBtHidCmdTests, Txt( ETxtMenuTests ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetMouse, Txt( ETxtMenuForgetMouse ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetKeyboard, Txt( ETxtMenuForgetKeys ));
@@ -914,6 +925,15 @@ private:
 		case EBtHidCmdPickPad:
 			if( iConnectErr == KErrNone )
 				iSearch->Start( EBtHidGamepad );
+			break;
+		case EBtHidCmdPadKeys:
+			if( iConnectErr == KErrNone )
+			{
+				TBtHidStatusPckg st;
+				if( iMgr.Status( st ) == KErrNone )
+					iMgr.SetPadKeys( !st().iPadKeys );
+			}
+			Refresh();
 			break;
 		case EBtHidCmdForgetPads:
 			if( iConnectErr == KErrNone )

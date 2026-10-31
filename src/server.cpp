@@ -39,7 +39,11 @@ public:
 	// MBtHidObserver
 	void BtHidMouse( TInt aDx, TInt aDy, TInt aWheel, TInt aButtons );
 	void BtHidKey( TInt aUsage, TBool aDown );
+	void BtHidPadKey( TInt aUsage, TBool aDown );
 	void BtHidSearchDone( TInt aError );
+	// procesos que leen los joysticks (PadState): a esos no les mandamos las teclas del modo teclado
+	void AddPadUser( TUint aPid );
+	TBool IsPadUser( TUint aPid ) const;
 	void BtHidLog( const char *aMsg );
 
 private:
@@ -55,6 +59,8 @@ private:
 	RMessagePtr2   iSearchMsg;
 	CBtHidSession *iSearchSession;
 	TDblQue<CBtHidSession> iQueue;
+	TUint          iPadUsers[8];
+	TInt           iNumPadUsers;
 	friend class CBtHidSession;
 };
 
@@ -65,6 +71,7 @@ public:
 	~CBtHidSession();
 	void Push( const THIDEvent &aEvent );
 	TBool WantsEvents() const { return iWantsEvents; }
+	TUint Pid() const { return iPid; }
 
 	TDblQueLink iLink;
 
@@ -78,6 +85,7 @@ private:
 	TInt         iHead, iCount;
 	TBool        iWantsEvents;
 	RMessagePtr2 iWait;
+	TUint        iPid;      // el proceso de la app (0 = todavia no se sabe)
 };
 
 /* ------------------------------------------------------------------ */
@@ -147,6 +155,20 @@ void CBtHidSession::Deliver()
 
 void CBtHidSession::ServiceL( const RMessage2 &aMessage )
 {
+	if( !iPid )
+	{
+		RThread thread;
+		if( aMessage.Client( thread ) == KErrNone )
+		{
+			RProcess proc;
+			if( thread.Process( proc ) == KErrNone )
+			{
+				iPid = (TUint)proc.Id();
+				proc.Close();
+			}
+			thread.Close();
+		}
+	}
 	switch( aMessage.Function())
 	{
 	case EBtHidWaitEvent:
@@ -181,8 +203,14 @@ void CBtHidSession::ServiceL( const RMessage2 &aMessage )
 			Server().Host()->Forget( aMessage.Int0());
 		aMessage.Complete( KErrNone );
 		return;
+	case EBtHidPadKeys:
+		if( Server().Host())
+			Server().Host()->SetPadKeys( aMessage.Int0());
+		aMessage.Complete( KErrNone );
+		return;
 	case EBtHidPadState:
 		{
+			Server().AddPadUser( iPid );
 			TBtHidPadStatePckg st;
 			Mem::FillZ( &st(), sizeof( TBtHidPadState ));
 			if( Server().Host())
@@ -203,6 +231,7 @@ void CBtHidSession::ServiceL( const RMessage2 &aMessage )
 			if( Server().Host())
 				Server().Host()->GetStatus( st());
 			st().iClients = Server().Clients();
+			st().iPadKeys = Server().Host() ? Server().Host()->PadKeys() : EFalse;
 			aMessage.WriteL( 0, st );
 			aMessage.Complete( KErrNone );
 		}
@@ -397,6 +426,39 @@ void CBtHidServer::BtHidKey( TInt aUsage, TBool aDown )
 	k->iType = aDown ? EEventHIDKeyDown : EEventHIDKeyUp;
 	k->iScanCode = aUsage;
 	Push( ev );
+}
+
+void CBtHidServer::BtHidPadKey( TInt aUsage, TBool aDown )
+{
+	THIDEvent ev;
+	ev.SetType( THIDEvent::EKeyEvent );
+	THIDKeyEvent *k = ev.Key();
+	k->iType = aDown ? EEventHIDKeyDown : EEventHIDKeyUp;
+	k->iScanCode = aUsage;
+	TDblQueIter<CBtHidSession> it( iQueue );
+	CBtHidSession *s;
+	while(( s = it++ ) != NULL )
+		if( !s->Pid() || !IsPadUser( s->Pid()))
+			s->Push( ev );
+}
+
+void CBtHidServer::AddPadUser( TUint aPid )
+{
+	if( !aPid || IsPadUser( aPid ))
+		return;
+	if( iNumPadUsers < 8 )
+		iPadUsers[iNumPadUsers++] = aPid;
+	else
+		iPadUsers[7] = aPid;
+}
+
+TBool CBtHidServer::IsPadUser( TUint aPid ) const
+{
+	TInt i;
+	for( i = 0; i < iNumPadUsers; i++ )
+		if( iPadUsers[i] == aPid )
+			return ETrue;
+	return EFalse;
 }
 
 /* log en c:\data\bthid_log.txt: solo conexiones y errores (pocos) */

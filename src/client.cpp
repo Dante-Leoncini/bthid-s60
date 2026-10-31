@@ -160,4 +160,9 @@ EXPORT_C TInt RBtHidManager::SetPadRumble( TInt aPad, TBool aOn )
 	return SendReceive( EBtHidPadRumble, TIpcArgs( aPad, aOn ));
 }
 
+EXPORT_C TInt RBtHidManager::SetPadKeys( TBool aOn )
+{
+	return SendReceive( EBtHidPadKeys, TIpcArgs( aOn ));
+}
+
 #endif // BTHID_HINKKA_COMPAT
