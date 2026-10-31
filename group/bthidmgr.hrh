@@ -17,7 +17,16 @@ enum TBtHidMgrCommands
 	EBtHidCmdPickPad,
 	EBtHidCmdForgetPads,
 	EBtHidCmdTestPads,
-	EBtHidCmdPadKeys
+	EBtHidCmdPadKeys,
+	EBtHidCmdProfiles,
+	EBtHidCmdProfUse,
+	EBtHidCmdProfEdit,
+	EBtHidCmdProfNew,
+	EBtHidCmdProfRename,
+	EBtHidCmdProfDelete,
+	EBtHidCmdProfKey,
+	EBtHidCmdProfClear,
+	EBtHidCmdProfPad
 };
 
 #endif

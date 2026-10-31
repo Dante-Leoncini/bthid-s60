@@ -56,9 +56,99 @@ RESOURCE MENU_PANE r_mgr_menu
 		MENU_ITEM { command = EBtHidCmdForgetKeyboard; txt = "Remove keyboard"; },
 		MENU_ITEM { command = EBtHidCmdForgetPads;     txt = "Remove controllers"; },
 		MENU_ITEM { command = EBtHidCmdPadKeys;        txt = "Controllers as keyboard"; },
+		MENU_ITEM { command = EBtHidCmdProfiles;       txt = "Choose profile"; },
 		MENU_ITEM { command = EBtHidCmdPs3;            txt = "PS3 controller"; },
 		MENU_ITEM { command = EBtHidCmdAbout;          txt = "About"; },
 		MENU_ITEM { command = EAknCmdExit;             txt = "Exit"; }
+	};
+}
+
+// perfiles del joystick como teclado: la lista de perfiles y la de botones de uno
+RESOURCE MENU_BAR r_mgr_prof_menubar
+{
+	titles = { MENU_TITLE { menu_pane = r_mgr_prof_menu; } };
+}
+
+RESOURCE MENU_PANE r_mgr_prof_menu
+{
+	items =
+	{
+		MENU_ITEM { command = EBtHidCmdProfUse;    txt = "Assign"; },
+		MENU_ITEM { command = EBtHidCmdProfEdit;   txt = "Edit"; },
+		MENU_ITEM { command = EBtHidCmdProfNew;    txt = "New profile"; },
+		MENU_ITEM { command = EBtHidCmdProfRename; txt = "Rename"; },
+		MENU_ITEM { command = EBtHidCmdProfDelete; txt = "Delete"; }
+	};
+}
+
+RESOURCE MENU_BAR r_mgr_edit_menubar
+{
+	titles = { MENU_TITLE { menu_pane = r_mgr_edit_menu; } };
+}
+
+RESOURCE MENU_PANE r_mgr_edit_menu
+{
+	items =
+	{
+		MENU_ITEM { command = EBtHidCmdProfKey;   txt = "Change key"; },
+		MENU_ITEM { command = EBtHidCmdProfClear; txt = "Not assigned"; },
+		MENU_ITEM { command = EBtHidCmdProfPad;   txt = "Other controller"; }
+	};
+}
+
+// elegir de una lista (el joystick, la tecla): los renglones y el titulo los pone la app
+RESOURCE AVKON_LIST_QUERY r_mgr_list_query
+{
+	flags = EGeneralQueryFlags;
+	softkeys = R_AVKON_SOFTKEYS_OK_CANCEL;
+	items =
+	{
+		AVKON_LIST_QUERY_DLG_LINE
+		{
+			control = AVKON_LIST_QUERY_CONTROL
+			{
+				listtype = EAknCtSinglePopupMenuListBox;
+				listbox = AVKON_LIST_QUERY_LIST { };
+				heading = " ";
+			};
+		}
+	};
+}
+
+// el nombre de un perfil
+RESOURCE DIALOG r_mgr_name_query
+{
+	flags = EGeneralQueryFlags;
+	buttons = R_AVKON_SOFTKEYS_OK_CANCEL;
+	items =
+	{
+		DLG_LINE
+		{
+			type = EAknCtQuery;
+			id = EGeneralQuery;
+			control = AVKON_DATA_QUERY
+			{
+				layout = EDataLayout;
+				label = " ";
+				control = EDWIN { flags = EEikEdwinNoHorizScrolling | EEikEdwinResizable; maxlength = 24; width = 8; lines = 1; };
+			};
+		}
+	};
+}
+
+// si o no (borrar un perfil)
+RESOURCE DIALOG r_mgr_confirm_query
+{
+	flags = EGeneralQueryFlags;
+	buttons = R_AVKON_SOFTKEYS_YES_NO;
+	items =
+	{
+		DLG_LINE
+		{
+			type = EAknCtQuery;
+			id = EGeneralQuery;
+			control = AVKON_CONFIRMATION_QUERY { layout = EConfirmationQueryLayout; };
+		}
 	};
 }
 

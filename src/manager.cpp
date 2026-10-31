@@ -2,6 +2,9 @@
 manager.cpp - bthidmgr.exe, la app "Bluetooth HID": buscar, ver y olvidar el mouse y el teclado del servidor,
 y probarlos.
 
+Opciones > Seleccionar perfil: los perfiles del joystick como teclado (que tecla manda cada boton de cada
+joystick), se eligen, se crean y se editan desde la app (profiles.cpp guarda los archivos).
+
 Opciones > Buscar dispositivo abre el cuadro de Bluetooth del telefono; el elegido queda guardado en el
 servidor y se reconecta solo cada vez que una app lo usa. Opciones > Pruebas: la app recibe los eventos como
 cualquier juego (GetHIDClientAPI). En la del mouse se arrastra un cuadrado con cualquiera de los tres botones y
@@ -35,6 +38,15 @@ Textos en ingles o en castellano segun el idioma del telefono.
 #include <aknmessagequerydialog.h>
 #include <e32property.h>
 #include <bt_subscribe.h>
+#include <aknlists.h>
+#include <aknlistquerydialog.h>
+#include <aknquerydialog.h>
+#include <aknnotewrappers.h>
+#include <aknpopupheadingpane.h>
+#include <akntitle.h>
+#include <eikmenub.h>
+#include <eikspane.h>
+#include "profiles.h"
 
 const TUid KUidBtHidMgr = { 0xE0D69652 };
 
@@ -51,6 +63,9 @@ enum TTextId
 	ETxtMenuAbout, ETxtAboutText, ETxtMenuPs3, ETxtPs3Text, ETxtPs3NoAddr,
 	ETxtMenuPickPad, ETxtMenuForgetPads, ETxtMenuTestPads, ETxtPad, ETxtPadNone, ETxtPadHelp, ETxtPadRumble,
 	ETxtMenuPadKeysOn, ETxtMenuPadKeysOff,
+	ETxtMenuProfiles, ETxtProfTitle, ETxtProfInUse, ETxtProfUse, ETxtProfEdit, ETxtProfNew, ETxtProfRename,
+	ETxtProfDelete, ETxtProfKey, ETxtProfClear, ETxtProfPad, ETxtProfName, ETxtProfExists, ETxtProfNoDelete,
+	ETxtProfNoRename, ETxtProfAskDelete, ETxtProfUsing, ETxtProfPickPad, ETxtProfEditTitle, ETxtProfSaveErr,
 	ETxtCount
 };
 
@@ -103,6 +118,26 @@ static const TText *const KTextEn[ETxtCount] =
 	_S( "Vibration: %S" ),
 	_S( "Controllers as keyboard: yes" ),
 	_S( "Controllers as keyboard: no" ),
+	_S( "Choose profile" ),
+	_S( "Controller profiles" ),
+	_S( " (in use)" ),
+	_S( "Assign" ),
+	_S( "Edit" ),
+	_S( "New profile" ),
+	_S( "Rename" ),
+	_S( "Delete" ),
+	_S( "Change key" ),
+	_S( "Not assigned" ),
+	_S( "Other controller" ),
+	_S( "Profile name:" ),
+	_S( "There is already a profile with that name" ),
+	_S( "The default profile can't be deleted" ),
+	_S( "The default profile can't be renamed" ),
+	_S( "Delete %S?" ),
+	_S( "In use: %S (controllers as keyboard: yes)" ),
+	_S( "Which controller?" ),
+	_S( "%S: controller %d" ),
+	_S( "Couldn't save (%d)" ),
 };
 
 static const TText *const KTextEs[ETxtCount] =
@@ -154,6 +189,26 @@ static const TText *const KTextEs[ETxtCount] =
 	_S( "Vibraci\x00f3n: %S" ),
 	_S( "Joystick como teclado: s\x00ed" ),
 	_S( "Joystick como teclado: no" ),
+	_S( "Seleccionar perfil" ),
+	_S( "Perfiles del joystick" ),
+	_S( " (en uso)" ),
+	_S( "Asignar" ),
+	_S( "Editar" ),
+	_S( "Nuevo perfil" ),
+	_S( "Cambiar nombre" ),
+	_S( "Borrar" ),
+	_S( "Cambiar tecla" ),
+	_S( "Dejar sin asignar" ),
+	_S( "Otro joystick" ),
+	_S( "Nombre del perfil:" ),
+	_S( "Ya hay un perfil con ese nombre" ),
+	_S( "El perfil predeterminado no se puede borrar" ),
+	_S( "Al predeterminado no se le cambia el nombre" ),
+	_S( "\x00bf\x0042orrar %S?" ),
+	_S( "En uso: %S (joystick como teclado: s\x00ed)" ),
+	_S( "\x00bfQu\x00e9 joystick?" ),
+	_S( "%S: joystick %d" ),
+	_S( "No se pudo guardar (%d)" ),
 };
 
 static TBool gSpanish;
@@ -772,6 +827,77 @@ private:
 	MHIDSrvClient *iClient;
 };
 
+/* ------------------------------------------------------------------ */
+/* perfiles del joystick como teclado: la lista de perfiles y, al editar uno, la de botones con su tecla. El
+   centro hace lo principal de cada lista (asignar el perfil, cambiar la tecla), lo demas esta en Opciones */
+
+class CProfView : public CCoeControl, public MEikListBoxObserver
+{
+public:
+	CProfView( MEikCommandObserver &aObs ) : iObs( aObs ) {}
+	~CProfView()
+	{
+		delete iList;
+		delete iItems;
+	}
+
+	void ConstructL( const TRect &aRect )
+	{
+		CreateWindowL();
+		iItems = new( ELeave ) CDesCArrayFlat( 24 );
+		iList = new( ELeave ) CAknSingleStyleListBox;
+		iList->SetContainerWindowL( *this );
+		iList->ConstructL( this, EAknListBoxSelectionList );
+		iList->Model()->SetItemTextArray( iItems );
+		iList->Model()->SetOwnershipType( ELbmDoesNotOwnItemArray );
+		iList->CreateScrollBarFrameL( ETrue );
+		iList->ScrollBarFrame()->SetScrollBarVisibilityL( CEikScrollBarFrame::EOff, CEikScrollBarFrame::EAuto );
+		iList->SetListBoxObserver( this );
+		SetRect( aRect );
+		MakeVisible( EFalse );
+		ActivateL();
+	}
+
+	CDesCArray &Items() { return *iItems; }
+	TInt Current() const { return iList->CurrentItemIndex(); }
+	void SetCommand( TInt aCommand ) { iCommand = aCommand; }
+
+	// despues de cambiar los renglones
+	void ItemsChangedL( TInt aCurrent )
+	{
+		iList->HandleItemAdditionL();
+		if( aCurrent >= 0 && aCurrent < iItems->Count())
+			iList->SetCurrentItemIndex( aCurrent );
+		iList->DrawDeferred();
+	}
+
+	TKeyResponse OfferKeyEventL( const TKeyEvent &aKey, TEventCode aType )
+	{
+		if( aType == EEventKey && ( aKey.iCode == EKeyOK || aKey.iCode == EKeyEnter ))
+		{
+			iObs.ProcessCommandL( iCommand );
+			return EKeyWasConsumed;
+		}
+		return iList->OfferKeyEventL( aKey, aType );
+	}
+
+	void HandleListBoxEventL( CEikListBox *, TListBoxEvent aEvent )
+	{
+		if( aEvent == EEventEnterKeyPressed || aEvent == EEventItemDoubleClicked )
+			iObs.ProcessCommandL( iCommand ); // tocar un renglon en los de pantalla tactil
+	}
+
+private:
+	TInt CountComponentControls() const { return 1; }
+	CCoeControl *ComponentControl( TInt ) const { return iList; }
+	void SizeChanged() { if( iList ) iList->SetRect( Rect()); }
+
+	MEikCommandObserver    &iObs;
+	CAknSingleStyleListBox *iList;
+	CDesCArray             *iItems;
+	TInt                    iCommand;
+};
+
 class CMgrAppUi : public CAknAppUi
 {
 public:
@@ -792,10 +918,17 @@ public:
 		iView->SetEventError( iEvents->Start());
 		iTimer = CPeriodic::NewL( CActive::EPriorityStandard );
 		iTimer->Start( 0, 1000000, TCallBack( Tick, this ));
+		iProfNames = new( ELeave ) CDesCArrayFlat( 8 );
+		iProfView = new( ELeave ) CProfView( *this );
+		iProfView->ConstructL( ClientRect());
 	}
 	~CMgrAppUi()
 	{
 		delete iTimer;
+		if( iProfScreen != EProfNone )
+			RemoveFromStack( iProfView );
+		delete iProfView;
+		delete iProfNames;
 		delete iEvents;
 		delete iSearch;
 		iMgr.Close();
@@ -825,6 +958,7 @@ private:
 				TBool on = iConnectErr == KErrNone && iMgr.Status( st ) == KErrNone && st().iPadKeys;
 				aMenuPane->SetItemTextL( EBtHidCmdPadKeys, Txt( on ? ETxtMenuPadKeysOn : ETxtMenuPadKeysOff ));
 			}
+			aMenuPane->SetItemTextL( EBtHidCmdProfiles, Txt( ETxtMenuProfiles ));
 			aMenuPane->SetItemTextL( EBtHidCmdTests, Txt( ETxtMenuTests ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetMouse, Txt( ETxtMenuForgetMouse ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetKeyboard, Txt( ETxtMenuForgetKeys ));
@@ -837,6 +971,25 @@ private:
 			aMenuPane->SetItemTextL( EBtHidCmdTestMouse, Txt( ETxtMenuTestMouse ));
 			aMenuPane->SetItemTextL( EBtHidCmdTestKeys, Txt( ETxtMenuTestKeys ));
 			aMenuPane->SetItemTextL( EBtHidCmdTestPads, Txt( ETxtMenuTestPads ));
+		}
+		else if( aResourceId == R_MGR_PROF_MENU )
+		{
+			/* el predeterminado no se borra ni se le cambia el nombre */
+			TInt cur = iProfView->Current();
+			TBool def = cur <= 0 || cur >= iProfNames->Count() || !( *iProfNames )[cur].CompareF( Profiles::DefaultName());
+			aMenuPane->SetItemTextL( EBtHidCmdProfUse, Txt( ETxtProfUse ));
+			aMenuPane->SetItemTextL( EBtHidCmdProfEdit, Txt( ETxtProfEdit ));
+			aMenuPane->SetItemTextL( EBtHidCmdProfNew, Txt( ETxtProfNew ));
+			aMenuPane->SetItemTextL( EBtHidCmdProfRename, Txt( ETxtProfRename ));
+			aMenuPane->SetItemTextL( EBtHidCmdProfDelete, Txt( ETxtProfDelete ));
+			aMenuPane->SetItemDimmed( EBtHidCmdProfRename, def );
+			aMenuPane->SetItemDimmed( EBtHidCmdProfDelete, def );
+		}
+		else if( aResourceId == R_MGR_EDIT_MENU )
+		{
+			aMenuPane->SetItemTextL( EBtHidCmdProfKey, Txt( ETxtProfKey ));
+			aMenuPane->SetItemTextL( EBtHidCmdProfClear, Txt( ETxtProfClear ));
+			aMenuPane->SetItemTextL( EBtHidCmdProfPad, Txt( ETxtProfPad ));
 		}
 	}
 
@@ -861,6 +1014,302 @@ private:
 			ls.Close();
 		}
 		return KErrNone;
+	}
+
+	/* ---- perfiles ---- */
+
+	enum TProfScreen { EProfNone, EProfList, EProfEdit };
+
+	void SetTitleL( const TDesC *aText )
+	{
+		CAknTitlePane *title = static_cast<CAknTitlePane *>( StatusPane()->ControlL( TUid::Uid( EEikStatusPaneUidTitle )));
+		if( aText )
+			title->SetTextL( *aText );
+		else
+			title->SetTextToDefaultL();
+	}
+
+	void SetScreenL( TProfScreen aScreen )
+	{
+		if( aScreen != EProfNone && iProfScreen == EProfNone )
+		{
+			iView->MakeVisible( EFalse );
+			iProfView->MakeVisible( ETrue );
+			AddToStackL( iProfView );
+			Cba()->SetCommandSetL( R_AVKON_SOFTKEYS_OPTIONS_BACK );
+			Cba()->DrawNow();
+		}
+		else if( aScreen == EProfNone && iProfScreen != EProfNone )
+		{
+			RemoveFromStack( iProfView );
+			iProfView->MakeVisible( EFalse );
+			iView->MakeVisible( ETrue );
+			Cba()->SetCommandSetL( R_AVKON_SOFTKEYS_OPTIONS_EXIT );
+			Cba()->DrawNow();
+			SetTitleL( NULL );
+			Refresh();
+		}
+		iProfScreen = aScreen;
+		iEikonEnv->AppUiFactory()->MenuBar()->SetMenuTitleResourceId(
+			aScreen == EProfList ? R_MGR_PROF_MENUBAR : aScreen == EProfEdit ? R_MGR_EDIT_MENUBAR : R_MGR_MENUBAR );
+	}
+
+	// la lista de perfiles, con el que esta en uso marcado (y elegido, si no se pide otro)
+	void ShowProfilesL( const TDesC *aSelect )
+	{
+		CDesCArray &items = iProfView->Items();
+		TBuf<32> active;
+		TBuf<64> line;
+		TInt i, sel = 0;
+		TPtrC title = Txt( ETxtProfTitle );
+
+		Profiles::ListL( *iProfNames );
+		Profiles::Active( active );
+		items.Reset();
+		for( i = 0; i < iProfNames->Count(); i++ )
+		{
+			TPtrC name = ( *iProfNames )[i];
+			line.Copy( _L( "\t" ));
+			line.Append( name.Left( 32 ));
+			if( !name.CompareF( active ))
+			{
+				line.Append( Txt( ETxtProfInUse ));
+				if( !aSelect )
+					sel = i;
+			}
+			if( aSelect && !name.CompareF( *aSelect ))
+				sel = i;
+			items.AppendL( line );
+		}
+		SetScreenL( EProfList );
+		iProfView->SetCommand( EBtHidCmdProfUse );
+		iProfView->ItemsChangedL( sel );
+		SetTitleL( &title );
+	}
+
+	// los botones del joystick iProfPad del perfil que se edita, cada uno con su tecla
+	void ShowEditL( TInt aSelect )
+	{
+		CDesCArray &items = iProfView->Items();
+		TBuf<64> line;
+		TInt in;
+
+		items.Reset();
+		for( in = 0; in < EProfInputs; in++ )
+		{
+			TPtrC button = Profiles::InputName( in, gSpanish );
+			TPtrC key = Profiles::KeyName( Profiles::KeyOfUsage( iProf.iMap[iProfPad][in] ), gSpanish );
+			line.Format( _L( "\t%S: %S" ), &button, &key );
+			items.AppendL( line );
+		}
+		SetScreenL( EProfEdit );
+		iProfView->SetCommand( EBtHidCmdProfKey );
+		iProfView->ItemsChangedL( aSelect );
+		line.Format( Txt( ETxtProfEditTitle ), &iProf.iName, iProfPad + 1 );
+		SetTitleL( &line );
+	}
+
+	// elegir de una lista: el lugar elegido, o -1 si se cancelo
+	TInt AskListL( CDesCArray &aItems, const TDesC &aHeading, TInt aCurrent )
+	{
+		TInt sel = aCurrent;
+		CAknListQueryDialog *dlg = new( ELeave ) CAknListQueryDialog( &sel );
+		dlg->PrepareLC( R_MGR_LIST_QUERY );
+		dlg->SetItemTextArray( &aItems );
+		dlg->SetOwnershipType( ELbmDoesNotOwnItemArray );
+		dlg->QueryHeading()->SetTextL( aHeading );
+		dlg->ListBox()->HandleItemAdditionL();
+		if( aCurrent >= 0 && aCurrent < aItems.Count())
+			dlg->ListBox()->SetCurrentItemIndex( aCurrent );
+		return dlg->RunLD() ? sel : -1;
+	}
+
+	TBool AskPadL()
+	{
+		CDesCArrayFlat *items = new( ELeave ) CDesCArrayFlat( EBtHidMaxPads );
+		TBuf<32> b;
+		TInt i, pad;
+		CleanupStack::PushL( items );
+		for( i = 0; i < EBtHidMaxPads; i++ )
+		{
+			b.Format( Txt( ETxtPad ), i + 1 );
+			items->AppendL( b );
+		}
+		pad = AskListL( *items, Txt( ETxtProfPickPad ), iProfPad );
+		CleanupStack::PopAndDestroy( items );
+		if( pad < 0 )
+			return EFalse;
+		iProfPad = pad;
+		return ETrue;
+	}
+
+	// el nombre de un perfil: sin los caracteres que no van en un archivo y sin espacios en las puntas
+	TBool AskNameL( TDes &aName )
+	{
+		CAknTextQueryDialog *dlg = CAknTextQueryDialog::NewL( aName );
+		TInt i;
+		dlg->PrepareLC( R_MGR_NAME_QUERY );
+		dlg->SetPromptL( Txt( ETxtProfName ));
+		dlg->SetMaxLength( 24 );
+		if( !dlg->RunLD())
+			return EFalse;
+		for( i = aName.Length() - 1; i >= 0; i-- )
+			if( aName[i] < ' ' || _L( "\\/:*?\"<>|." ).Locate( aName[i] ) >= 0 )
+				aName.Delete( i, 1 );
+		aName.Trim();
+		return aName.Length() > 0;
+	}
+
+	void NoteL( const TDesC &aText, TBool aOk = EFalse )
+	{
+		if( aOk )
+			( new( ELeave ) CAknConfirmationNote( ETrue ))->ExecuteLD( aText );
+		else
+			( new( ELeave ) CAknInformationNote( ETrue ))->ExecuteLD( aText );
+	}
+
+	// el servidor vuelve a leer las teclas (y prende el modo teclado si se pide)
+	void ReloadKeys( TBool aTurnOn )
+	{
+		TBtHidStatusPckg st;
+		if( iConnectErr != KErrNone || iMgr.Status( st ) != KErrNone )
+			return;
+		if( aTurnOn || st().iPadKeys )
+			iMgr.SetPadKeys( ETrue );
+	}
+
+	// guarda el perfil que se edita; si es el que esta en uso, el servidor lo toma en el momento
+	void SaveProfL()
+	{
+		TBuf<32> active;
+		TBuf<48> err;
+		TInt e = Profiles::Save( iProf );
+		if( e != KErrNone )
+		{
+			err.Format( Txt( ETxtProfSaveErr ), e );
+			NoteL( err );
+			return;
+		}
+		Profiles::Active( active );
+		if( !active.CompareF( iProf.iName ) && Profiles::Activate( iProf.iName ) == KErrNone )
+			ReloadKeys( EFalse );
+	}
+
+	void ProfCommandL( TInt aCommand )
+	{
+		TInt cur = iProfView->Current();
+		TBuf<32> name;
+		TBuf<96> text;
+
+		if( iProfScreen == EProfList )
+		{
+			if( cur < 0 || cur >= iProfNames->Count())
+				cur = 0;
+			name = ( *iProfNames )[cur].Left( name.MaxLength());
+		}
+		switch( aCommand )
+		{
+		case EBtHidCmdProfUse:
+			if( Profiles::Activate( name ) == KErrNone )
+			{
+				ReloadKeys( ETrue );
+				ShowProfilesL( &name );
+				text.Format( Txt( ETxtProfUsing ), &name );
+				NoteL( text, ETrue );
+			}
+			break;
+		case EBtHidCmdProfEdit:
+			if( Profiles::Load( name, iProf ) && AskPadL())
+				ShowEditL( 0 );
+			break;
+		case EBtHidCmdProfNew:
+			if( !AskNameL( name ))
+				break;
+			if( Profiles::Exists( name ))
+			{
+				NoteL( Txt( ETxtProfExists ));
+				break;
+			}
+			Profiles::Empty( iProf, name ); // todas las teclas sin asignar
+			SaveProfL();
+			if( AskPadL())
+				ShowEditL( 0 );
+			else
+				ShowProfilesL( &name );
+			break;
+		case EBtHidCmdProfRename:
+		{
+			TBuf<32> active, to = name;
+			if( !name.CompareF( Profiles::DefaultName()))
+			{
+				NoteL( Txt( ETxtProfNoRename ));
+				break;
+			}
+			if( !AskNameL( to ) || to == name )
+				break;
+			if( to.CompareF( name ) && Profiles::Exists( to ))
+			{
+				NoteL( Txt( ETxtProfExists ));
+				break;
+			}
+			Profiles::Active( active );
+			if( Profiles::Rename( name, to ) == KErrNone && !active.CompareF( name ))
+				Profiles::Activate( to );
+			ShowProfilesL( &to );
+			break;
+		}
+		case EBtHidCmdProfDelete:
+		{
+			TBuf<32> active;
+			if( !name.CompareF( Profiles::DefaultName()))
+			{
+				NoteL( Txt( ETxtProfNoDelete ));
+				break;
+			}
+			text.Format( Txt( ETxtProfAskDelete ), &name );
+			CAknQueryDialog *dlg = CAknQueryDialog::NewL();
+			dlg->PrepareLC( R_MGR_CONFIRM_QUERY );
+			dlg->SetPromptL( text );
+			if( !dlg->RunLD())
+				break;
+			Profiles::Active( active );
+			Profiles::Delete( name );
+			if( !active.CompareF( name ) && Profiles::Activate( Profiles::DefaultName()) == KErrNone )
+				ReloadKeys( EFalse ); // se borro el que estaba en uso: queda el predeterminado
+			ShowProfilesL( NULL );
+			break;
+		}
+		case EBtHidCmdProfKey:
+		{
+			CDesCArrayFlat *keys;
+			TInt i, k;
+			if( cur < 0 || cur >= EProfInputs )
+				break;
+			keys = new( ELeave ) CDesCArrayFlat( Profiles::KeyCount());
+			CleanupStack::PushL( keys );
+			for( i = 0; i < Profiles::KeyCount(); i++ )
+				keys->AppendL( Profiles::KeyName( i, gSpanish ));
+			k = AskListL( *keys, Profiles::InputName( cur, gSpanish ), Profiles::KeyOfUsage( iProf.iMap[iProfPad][cur] ));
+			CleanupStack::PopAndDestroy( keys );
+			if( k < 0 )
+				break;
+			iProf.iMap[iProfPad][cur] = (TUint8)Profiles::KeyUsage( k );
+			SaveProfL();
+			ShowEditL( cur );
+			break;
+		}
+		case EBtHidCmdProfClear:
+			if( cur < 0 || cur >= EProfInputs )
+				break;
+			iProf.iMap[iProfPad][cur] = 0;
+			SaveProfL();
+			ShowEditL( cur );
+			break;
+		case EBtHidCmdProfPad:
+			if( AskPadL())
+				ShowEditL( cur );
+			break;
+		}
 	}
 
 	void HandleCommandL( TInt aCommand )
@@ -945,8 +1394,29 @@ private:
 				iMgr.ForgetAll();
 			Refresh();
 			break;
+		case EBtHidCmdProfiles:
+			ShowProfilesL( NULL );
+			break;
+		case EBtHidCmdProfUse:
+		case EBtHidCmdProfEdit:
+		case EBtHidCmdProfNew:
+		case EBtHidCmdProfRename:
+		case EBtHidCmdProfDelete:
+		case EBtHidCmdProfKey:
+		case EBtHidCmdProfClear:
+		case EBtHidCmdProfPad:
+			ProfCommandL( aCommand );
+			break;
 		case EAknSoftkeyBack:
-			SetMode( EModeStatus );
+			if( iProfScreen == EProfEdit )
+			{
+				TBuf<32> name = iProf.iName;
+				ShowProfilesL( &name );
+			}
+			else if( iProfScreen == EProfList )
+				SetScreenL( EProfNone );
+			else
+				SetMode( EModeStatus );
 			break;
 		case EAknSoftkeyExit:
 		case EAknCmdExit:
@@ -970,6 +1440,11 @@ private:
 	CSearch       *iSearch;
 	CEvents       *iEvents;
 	CPeriodic     *iTimer;
+	CProfView     *iProfView;
+	CDesCArray    *iProfNames;  // los perfiles, en el orden de la lista
+	TProfScreen    iProfScreen;
+	TPadProfile    iProf;       // el que se edita
+	TInt           iProfPad;    // y de que joystick
 };
 
 void CSearch::RunL()
