@@ -1,0 +1,9 @@
+// la lista de inicio de Symbian: el servidor arranca al prender el telefono (asi los mouse, teclados y joysticks
+// se conectan sin abrir la app). Se apaga desde la app: "Iniciar con el telefono"
+#include <startupitem.rh>
+
+RESOURCE STARTUP_ITEM_INFO bthidhostsrv
+{
+	executable_name = "!:\\sys\\bin\\bthidhostsrv.exe";
+	recovery = EStartupItemExPolicyNone;
+}

@@ -11,6 +11,11 @@ EPOCHEAPSIZE    0x1000 0x100000
 USERINCLUDE     ../inc ../src
 SYSTEMINCLUDE   /epoc32/include /epoc32/include/app /epoc32/include/mw /epoc32/include/platform /epoc32/include/platform/mw
 
+SOURCEPATH      .
+START RESOURCE  [e0d69650].rss
+TARGETPATH      \private\101f875a\import
+END
+
 SOURCEPATH      ../src
 SOURCE          server.cpp
 SOURCE          bthid_host.cpp

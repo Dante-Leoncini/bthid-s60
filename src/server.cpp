@@ -35,6 +35,8 @@ public:
 	void Search( const RMessage2 &aMessage );
 	void CancelSearch( CBtHidSession *aSession );
 	TInt Clients() const;
+	// lo arranco el telefono al prender (la lista de inicio): sin dispositivos guardados no hace falta seguir
+	void BootStarted();
 
 	// MBtHidObserver
 	void BtHidMouse( TInt aDx, TInt aDy, TInt aWheel, TInt aButtons );
@@ -315,6 +317,12 @@ void CBtHidServer::DropSession( CBtHidSession *aSession )
 	}
 }
 
+void CBtHidServer::BootStarted()
+{
+	if( iSessions <= 0 && iShutdown && ( !iHost || !iHost->DeviceCount()))
+		iShutdown->Start( KShutdownDelay, KShutdownDelay, TCallBack( Shutdown, this ));
+}
+
 TInt CBtHidServer::Shutdown( TAny * )
 {
 	CActiveScheduler::Stop();
@@ -485,14 +493,43 @@ void CBtHidServer::BtHidLog( const char *aMsg )
 
 /* ------------------------------------------------------------------ */
 
+/* "Iniciar con el telefono" (la app): c:\data\bthid_autoinicio.txt, "0" = no. Sin el archivo, si */
+_LIT( KAutoStartFile, "c:\\data\\bthid_autoinicio.txt" );
+
+static TBool AutoStartOn()
+{
+	RFs   fs;
+	RFile f;
+	TBuf8<1> b;
+	TBool on = ETrue;
+	if( fs.Connect() != KErrNone )
+		return on;
+	if( f.Open( fs, KAutoStartFile, EFileRead | EFileShareAny ) == KErrNone )
+	{
+		if( f.Read( b ) == KErrNone && b.Length() && b[0] == '0' )
+			on = EFalse;
+		f.Close();
+	}
+	BtHidCloseFs( fs );
+	return on;
+}
+
 static void RunServerL()
 {
+	/* sin argumentos lo arranco el telefono al prender (la lista de inicio, [e0d69650].rss): si en la app
+	   esta apagado "Iniciar con el telefono", no hacemos nada */
+	TBool boot = User::CommandLineLength() == 0;
+	if( boot && !AutoStartOn())
+		return;
+
 	CActiveScheduler *sched = new( ELeave ) CActiveScheduler;
 	CleanupStack::PushL( sched );
 	CActiveScheduler::Install( sched );
 
 	User::LeaveIfError( User::RenameThread( KBtHidServerName ));
-	CBtHidServer::NewLC();
+	CBtHidServer *server = CBtHidServer::NewLC();
+	if( boot )
+		server->BootStarted();
 	RProcess::Rendezvous( KErrNone );
 	CActiveScheduler::Start();
 

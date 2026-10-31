@@ -57,6 +57,7 @@ RESOURCE MENU_PANE r_mgr_menu
 		MENU_ITEM { command = EBtHidCmdForgetPads;     txt = "Remove controllers"; },
 		MENU_ITEM { command = EBtHidCmdPadKeys;        txt = "Controllers as keyboard"; },
 		MENU_ITEM { command = EBtHidCmdProfiles;       txt = "Choose profile"; },
+		MENU_ITEM { command = EBtHidCmdAutoStart;      txt = "Start with the phone"; },
 		MENU_ITEM { command = EBtHidCmdPs3;            txt = "PS3 controller"; },
 		MENU_ITEM { command = EBtHidCmdAbout;          txt = "About"; },
 		MENU_ITEM { command = EAknCmdExit;             txt = "Exit"; }

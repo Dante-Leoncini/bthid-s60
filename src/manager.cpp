@@ -66,6 +66,7 @@ enum TTextId
 	ETxtMenuProfiles, ETxtProfTitle, ETxtProfInUse, ETxtProfUse, ETxtProfEdit, ETxtProfNew, ETxtProfRename,
 	ETxtProfDelete, ETxtProfKey, ETxtProfClear, ETxtProfPad, ETxtProfName, ETxtProfExists, ETxtProfNoDelete,
 	ETxtProfNoRename, ETxtProfAskDelete, ETxtProfUsing, ETxtProfPickPad, ETxtProfEditTitle, ETxtProfSaveErr,
+	ETxtMenuAutoOn, ETxtMenuAutoOff, ETxtPadNoNum,
 	ETxtCount
 };
 
@@ -138,6 +139,9 @@ static const TText *const KTextEn[ETxtCount] =
 	_S( "Which controller?" ),
 	_S( "%S: controller %d" ),
 	_S( "Couldn't save (%d)" ),
+	_S( "Start with the phone: yes" ),
+	_S( "Start with the phone: no" ),
+	_S( "Controller" ),
 };
 
 static const TText *const KTextEs[ETxtCount] =
@@ -209,6 +213,9 @@ static const TText *const KTextEs[ETxtCount] =
 	_S( "\x00bfQu\x00e9 joystick?" ),
 	_S( "%S: joystick %d" ),
 	_S( "No se pudo guardar (%d)" ),
+	_S( "Iniciar con el tel\x00e9\x0066ono: s\x00ed" ),
+	_S( "Iniciar con el tel\x00e9\x0066ono: no" ),
+	_S( "Joystick" ),
 };
 
 static TBool gSpanish;
@@ -959,6 +966,7 @@ private:
 				aMenuPane->SetItemTextL( EBtHidCmdPadKeys, Txt( on ? ETxtMenuPadKeysOn : ETxtMenuPadKeysOff ));
 			}
 			aMenuPane->SetItemTextL( EBtHidCmdProfiles, Txt( ETxtMenuProfiles ));
+			aMenuPane->SetItemTextL( EBtHidCmdAutoStart, Txt( AutoStart() ? ETxtMenuAutoOn : ETxtMenuAutoOff ));
 			aMenuPane->SetItemTextL( EBtHidCmdTests, Txt( ETxtMenuTests ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetMouse, Txt( ETxtMenuForgetMouse ));
 			aMenuPane->SetItemTextL( EBtHidCmdForgetKeyboard, Txt( ETxtMenuForgetKeys ));
@@ -1014,6 +1022,38 @@ private:
 			ls.Close();
 		}
 		return KErrNone;
+	}
+
+	/* "Iniciar con el telefono": el servidor lo lee al arrancar con el telefono (server.cpp) */
+	static TBool AutoStart()
+	{
+		RFs   fs;
+		RFile f;
+		TBuf8<1> b;
+		TBool on = ETrue;
+		if( fs.Connect() != KErrNone )
+			return on;
+		if( f.Open( fs, _L( "c:\\data\\bthid_autoinicio.txt" ), EFileRead | EFileShareAny ) == KErrNone )
+		{
+			if( f.Read( b ) == KErrNone && b.Length() && b[0] == '0' )
+				on = EFalse;
+			f.Close();
+		}
+		static_cast<RHandleBase &>( fs ).Close();
+		return on;
+	}
+	static void SetAutoStart( TBool aOn )
+	{
+		RFs   fs;
+		RFile f;
+		if( fs.Connect() != KErrNone )
+			return;
+		if( f.Replace( fs, _L( "c:\\data\\bthid_autoinicio.txt" ), EFileWrite ) == KErrNone )
+		{
+			f.Write( aOn ? _L8( "1" ) : _L8( "0" ));
+			f.Close();
+		}
+		static_cast<RHandleBase &>( fs ).Close();
 	}
 
 	/* ---- perfiles ---- */
@@ -1397,6 +1437,9 @@ private:
 		case EBtHidCmdProfiles:
 			ShowProfilesL( NULL );
 			break;
+		case EBtHidCmdAutoStart:
+			SetAutoStart( !AutoStart());
+			break;
 		case EBtHidCmdProfUse:
 		case EBtHidCmdProfEdit:
 		case EBtHidCmdProfNew:
@@ -1519,7 +1562,12 @@ void CMgrAppUi::Refresh()
 			if( d->iType != EBtHidGamepad )
 				continue;
 			TBuf<32> name, kind;
-			kind.Format( Txt( ETxtPad ), ++pad );
+			/* el numero es el de jugador: por orden de conexion (sin conectar todavia, sin numero) */
+			if( d->iPlayer > 0 )
+				kind.Format( Txt( ETxtPad ), d->iPlayer );
+			else
+				kind = Txt( ETxtPadNoNum );
+			pad++;
 			name.Copy( d->iName );
 			if( !name.Length())
 				name.Format( _L( "%02x:%02x:%02x:%02x:%02x:%02x" ), d->iAddr[0], d->iAddr[1], d->iAddr[2], d->iAddr[3], d->iAddr[4], d->iAddr[5] );

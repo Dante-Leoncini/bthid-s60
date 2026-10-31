@@ -19,6 +19,7 @@ struct TBtHidDeviceInfo
 	TInt      iState;  // TBtHidDeviceState
 	TInt      iError;  // ultimo error de conexion (0 = ninguno)
 	TBuf8<32> iName;
+	TInt      iPlayer; // joystick: numero de jugador 1-4, por orden de conexion (0 = no se conecto todavia)
 };
 
 struct TBtHidStatus

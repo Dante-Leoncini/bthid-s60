@@ -19,7 +19,7 @@ TInt BtHidStartServer()
 	TRequestStatus status;
 	TInt           err;
 
-	err = server.Create( KBtHidServerExe, KNullDesC );
+	err = server.Create( KBtHidServerExe, _L( "app" )); // (sin argumentos = lo arranco el telefono al prender)
 	if( err != KErrNone )
 		return err;
 	server.Rendezvous( status );

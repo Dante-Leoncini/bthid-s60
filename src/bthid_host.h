@@ -54,10 +54,12 @@ public:
 	void ForgetAll();
 	void Forget( TInt aType );
 	void GetStatus( TBtHidStatus &aStatus ) const;
-	// joysticks: el numero aPad (0-3) es el orden entre los joysticks guardados
+	// joysticks: el numero aPad (0-3) es el de jugador, por orden de conexion desde que arranco el servidor (el
+	// primero que se conecta es el 1); si uno se corta, al volver recupera el suyo
 	void GetPadState( TInt aPad, TBtHidPadState &aState ) const;
 	void SetPadRumble( TInt aPad, TBool aOn );
 	TInt PadIndex( const CBtHidDevice *aDev ) const;
+	void AssignPlayer( CBtHidDevice *aDev );
 	// modo teclado de los joysticks: prendido, y que tecla (uso HID) manda cada boton (EPadKeyInputs por joystick)
 	enum { EPadKeyInputs = EBtHidPadButtons + 4 }; // los botones y el stick izquierdo (arriba derecha abajo izquierda)
 	void SetPadKeys( TBool aOn );

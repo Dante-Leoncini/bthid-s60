@@ -13,6 +13,8 @@
 :"Dante Leoncini"
 
 "$(EPOCROOT)epoc32\release\$(PLATFORM)\$(TARGET)\bthidhostsrv.exe" - "!:\sys\bin\bthidhostsrv.exe"
+; arrancar con el telefono (la lista de inicio)
+"$(EPOCROOT)epoc32\data\z\private\101f875a\import\[e0d69650].rsc" - "c:\private\101f875a\import\[e0d69650].rsc"
 "$(EPOCROOT)epoc32\release\$(PLATFORM)\$(TARGET)\bthidhost.dll"    - "!:\sys\bin\bthidhost.dll"
 "$(EPOCROOT)epoc32\release\$(PLATFORM)\$(TARGET)\hidsrv.dll"       - "!:\sys\bin\hidsrv.dll"
 "$(EPOCROOT)epoc32\release\$(PLATFORM)\$(TARGET)\bthidmgr.exe"     - "!:\sys\bin\bthidmgr.exe"

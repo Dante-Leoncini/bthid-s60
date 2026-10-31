@@ -138,6 +138,8 @@ public:
 	TInt State() const { return iConnected ? EBtHidConnected : iState == EWaitDevice ? EBtHidWaiting
 		: iState == EWaitRetry ? EBtHidDisconnected : EBtHidConnecting; }
 	TInt Flags() const { return iFlags; }
+	TInt Player() const { return iPlayer; }
+	void SetPlayer( TInt aPlayer ) { iPlayer = aPlayer; }
 	TInt Error() const { return iError; }
 	const TDesC8 &Descriptor() const { return iDesc; }
 	void DescriptorDone( TInt aError, const TDesC8 &aDesc, TInt aFlags );
@@ -196,6 +198,7 @@ private:
 	TInt        iLastBtnByte;    // para el log: cambios del byte de botones
 	TInt        iBtnLogged;
 	// joystick
+	TInt        iPlayer;         // numero de jugador 1-4 (0 = no se conecto desde que arranco el servidor)
 	TBuf8<8>    iPadCmd;         // el SET_REPORT que lo activa (DualShock 3)
 	TBuf8<80>   iPadOut;         // luces y vibracion
 	TInt        iPadKind;        // TBtHidPadKind, segun el formato de los reportes
@@ -422,7 +425,10 @@ void CBtHidDevice::RunL()
 		Log( iType == EBtHidGamepad ? "conectado" : iProtoBoot ? "conectado (protocolo boot)" : "conectado (reportes del descriptor)", err );
 		iPadReports = 0;
 		if( iType == EBtHidGamepad )
+		{
+			iHost.AssignPlayer( this );
 			PadOutput(); // la luz de su numero
+		}
 		LogDescriptor();
 		iState = EReading;
 		iIntr.Recv( iBuf, 0, iStatus );
@@ -1168,23 +1174,34 @@ void CBtHidHost::SetPadKeys( TBool aOn )
 
 TInt CBtHidHost::PadIndex( const CBtHidDevice *aDev ) const
 {
-	TInt i, n = 0;
-	for( i = 0; i < EMaxDevices; i++ )
+	return aDev && aDev->Player() > 0 ? aDev->Player() - 1 : -1;
+}
+
+/* recien conectado: si no tenia numero (primera vez desde que arranco el servidor), el mas chico libre */
+void CBtHidHost::AssignPlayer( CBtHidDevice *aDev )
+{
+	TInt n, i;
+	if( aDev->Player() > 0 )
+		return;
+	for( n = 1; n <= EBtHidMaxPads; n++ )
 	{
-		if( !iDev[i] || iDev[i]->Type() != EBtHidGamepad )
-			continue;
-		if( iDev[i] == aDev )
-			return n;
-		n++;
+		for( i = 0; i < EMaxDevices; i++ )
+			if( iDev[i] && iDev[i] != aDev && iDev[i]->Type() == EBtHidGamepad && iDev[i]->Player() == n )
+				break;
+		if( i == EMaxDevices )
+		{
+			aDev->SetPlayer( n );
+			iObserver.BtHidLog( n == 1 ? "joystick: jugador 1" : n == 2 ? "joystick: jugador 2" : n == 3 ? "joystick: jugador 3" : "joystick: jugador 4" );
+			return;
+		}
 	}
-	return -1;
 }
 
 static CBtHidDevice *FindPad( CBtHidDevice *const *aDev, TInt aCount, TInt aPad )
 {
-	TInt i, n = 0;
+	TInt i;
 	for( i = 0; i < aCount; i++ )
-		if( aDev[i] && aDev[i]->Type() == EBtHidGamepad && n++ == aPad )
+		if( aDev[i] && aDev[i]->Type() == EBtHidGamepad && aDev[i]->Player() == aPad + 1 )
 			return aDev[i];
 	return NULL;
 }
@@ -1489,6 +1506,7 @@ void CBtHidHost::GetStatus( TBtHidStatus &aStatus ) const
 		info.iState = iDev[i]->State();
 		info.iError = iDev[i]->Error();
 		info.iName  = iDev[i]->Name();
+		info.iPlayer = iDev[i]->Type() == EBtHidGamepad ? iDev[i]->Player() : 0;
 		aStatus.iCount++;
 	}
 }
