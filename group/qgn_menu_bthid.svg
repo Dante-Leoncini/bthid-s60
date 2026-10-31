@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!-- icono de Bluetooth HID: un mouse (dibujo propio, licencia MIT como el resto del repo) -->
 <svg xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="tiny" width="88" height="88" viewBox="0 0 88 88">
+  <!-- el degradado en coordenadas del dibujo: el motor SVG de S60 ubicaba mal el de objectBoundingBox -->
   <defs>
-    <linearGradient id="cuerpo" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="cuerpo" gradientUnits="userSpaceOnUse" x1="21" y1="9" x2="67" y2="81">
       <stop offset="0" stop-color="#ffffff"/>
       <stop offset="1" stop-color="#aeb7c2"/>
     </linearGradient>
