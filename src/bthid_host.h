@@ -50,6 +50,12 @@ public:
 	// abre el cuadro de busqueda de dispositivos Bluetooth del telefono; el elegido se conecta y se guarda.
 	// aType: que es (mouse o teclado); 0 = lo que diga la clase del dispositivo
 	void SelectDevice( TInt aType = 0 );
+	// lo mismo para un joystick en el lugar aSlot (1-4): ese es su numero de jugador
+	void SelectPad( TInt aSlot );
+	// mientras esta abierto el cuadro de busqueda no se llama a nadie (la busqueda necesita la radio)
+	TBool Searching() const { return IsActive(); }
+	// desconectar / conectar / quitar uno (TBtHidDeviceCommand)
+	TInt DeviceCommand( const TBTDevAddr &aAddr, TInt aCommand );
 	void CancelSelect();
 	void ForgetAll();
 	void Forget( TInt aType );
@@ -81,7 +87,8 @@ private:
 	void ConstructL( const TDesC &aSaveFile );
 	void RunL();
 	void DoCancel();
-	void AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc, TInt aFlags, TBool aCall );
+	void AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc, TInt aFlags, TBool aCall,
+		TInt aPlayer = 0 );
 	void Load();
 
 	MBtHidObserver               &iObserver;
@@ -94,6 +101,7 @@ private:
 	CBtHidListener               *iListenCtrl, *iListenIntr;
 	TFileName                     iFile;
 	TInt                          iSelectType;
+	TInt                          iSelectSlot;   // el lugar del joystick que se busca (0 = no es un joystick)
 	TBool                         iPadKeys;
 	TUint8                        iPadKeyMap[EBtHidMaxPads][EPadKeyInputs];
 };

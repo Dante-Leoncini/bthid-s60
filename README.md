@@ -7,6 +7,13 @@ El de Hinkka no manda el estado de los botones del mouse: por cada reporte manda
 soltado en el mismo instante), asi que no se puede mantener un boton apretado ni arrastrar. Este se conecta
 directo al dispositivo, lee los reportes tal cual vienen y manda apretado al apretar y soltado al soltar.
 
+## Instalar
+
+Instalar `sis/bthid_0.8.sisx` en el telefono (en la memoria del telefono, C:) y reiniciarlo. La app **Bluetooth
+HID** muestra en su pantalla principal los lugares Mouse, Teclado y Joystick 1 a 4: arriba y abajo eligen uno y el
+centro abre sus opciones (agregar, conectar, desconectar, pasar a otro numero, quitar). Lo nuevo de cada version esta
+en [CHANGELOG.md](CHANGELOG.md).
+
 ## Que se instala
 
 - `bthidhostsrv.exe`: servidor sin interfaz. Se queda con la conexion Bluetooth del mouse y el teclado

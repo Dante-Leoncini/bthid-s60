@@ -67,6 +67,8 @@ enum TTextId
 	ETxtProfDelete, ETxtProfKey, ETxtProfClear, ETxtProfPad, ETxtProfName, ETxtProfExists, ETxtProfNoDelete,
 	ETxtProfNoRename, ETxtProfAskDelete, ETxtProfUsing, ETxtProfPickPad, ETxtProfEditTitle, ETxtProfSaveErr,
 	ETxtMenuAutoOn, ETxtMenuAutoOff, ETxtPadNoNum,
+	ETxtSlotEmpty, ETxtSlotAddPad, ETxtSlotConnect, ETxtSlotDisconnect, ETxtSlotRemove, ETxtSlotStopped,
+	ETxtSlotCalling, ETxtBattery, ETxtCharging, ETxtSlotHelp, ETxtSlotOptions, ETxtSlotMove, ETxtBatteryNone,
 	ETxtCount
 };
 
@@ -142,6 +144,19 @@ static const TText *const KTextEn[ETxtCount] =
 	_S( "Start with the phone: yes" ),
 	_S( "Start with the phone: no" ),
 	_S( "Controller" ),
+	_S( "empty" ),
+	_S( "Add a controller here" ),
+	_S( "Connect" ),
+	_S( "Disconnect" ),
+	_S( "Remove" ),
+	_S( "   disconnected" ),
+	_S( "   calling it... (press PS)" ),
+	_S( "   battery %d%%" ),
+	_S( "   charging" ),
+	_S( "Up/down: choose. Center: options" ),
+	_S( "Options" ),
+	_S( "Move to controller %d" ),
+	_S( "  battery ?" ),
 };
 
 static const TText *const KTextEs[ETxtCount] =
@@ -216,6 +231,19 @@ static const TText *const KTextEs[ETxtCount] =
 	_S( "Iniciar con el tel\x00e9\x0066ono: s\x00ed" ),
 	_S( "Iniciar con el tel\x00e9\x0066ono: no" ),
 	_S( "Joystick" ),
+	_S( "vac\x00edo" ),
+	_S( "Agregar un joystick ac\x00e1" ),
+	_S( "Conectar" ),
+	_S( "Desconectar" ),
+	_S( "Quitar" ),
+	_S( "   desconectado" ),
+	_S( "   llam\x00e1ndolo... (apret\x00e1 PS)" ),
+	_S( "   bater\x00ed\x0061 %d%%" ),
+	_S( "   cargando" ),
+	_S( "Arriba/abajo: elegir. Centro: opciones" ),
+	_S( "Opciones" ),
+	_S( "Pasar a joystick %d" ),
+	_S( "  bater\x00ed\x0061 ?" ),
 };
 
 static TBool gSpanish;
@@ -285,6 +313,15 @@ static void UsageName( TInt aUsage, TDes &aName )
 
 enum TMgrMode { EModeStatus, EModeMouse, EModeKeys, EModePads };
 
+/* los lugares de la pantalla principal: el mouse, el teclado y los joysticks 1-4 */
+enum { ESlotMouse = 0, ESlotKeyboard, ESlotPad1, ESlots = ESlotPad1 + EBtHidMaxPads };
+
+class MSlotObserver
+{
+public:
+	virtual void SlotSelectedL( TInt aSlot ) = 0;
+};
+
 class CMgrView : public CCoeControl
 {
 public:
@@ -307,6 +344,16 @@ public:
 	}
 
 	void SetLines( const CDesCArray *aLines ) { iLines = aLines; if( iMode == EModeStatus ) DrawDeferred(); }
+	// los lugares: dos renglones por lugar (que es y como esta) y lo de abajo
+	void SetSlots( const CDesCArray *aSlots, const CDesCArray *aFoot, MSlotObserver *aObs )
+	{
+		iSlots = aSlots;
+		iFoot = aFoot;
+		iObs = aObs;
+		if( iMode == EModeStatus ) DrawDeferred();
+	}
+	TInt Selected() const { return iSel; }
+	void Select( TInt aSlot ) { iSel = aSlot; DrawDeferred(); }
 	void SetManager( RBtHidManager *aMgr ) { iMgr = aMgr; }
 
 	/* prueba de los joysticks: el estado se pide 20 veces por segundo (no llegan como eventos) */
@@ -329,6 +376,20 @@ public:
 
 	TKeyResponse OfferKeyEventL( const TKeyEvent &aKey, TEventCode aType )
 	{
+		if( iMode == EModeStatus && aType == EEventKey && iSlots )
+		{
+			if( aKey.iCode == EKeyUpArrow || aKey.iCode == EKeyDownArrow )
+			{
+				iSel = ( iSel + ( aKey.iCode == EKeyDownArrow ? 1 : ESlots - 1 )) % ESlots;
+				DrawDeferred();
+				return EKeyWasConsumed;
+			}
+			if(( aKey.iCode == EKeyDevice3 || aKey.iCode == EKeyEnter || aKey.iCode == EKeyOK ) && iObs )
+			{
+				iObs->SlotSelectedL( iSel );
+				return EKeyWasConsumed;
+			}
+		}
 		if( iMode != EModePads || aType != EEventKey )
 			return EKeyWasNotConsumed;
 		if( aKey.iCode == EKeyLeftArrow || aKey.iCode == EKeyRightArrow )
@@ -512,12 +573,72 @@ private:
 		else if( iMode == EModePads )
 			DrawPadsTest( gc, font );
 		else
-			DrawLines( gc, font, iLines, font->AscentInPixels() + 3 );
+			DrawStatus( gc, font );
 		gc.DiscardFont();
+	}
+
+	/* la pantalla principal: el titulo, los seis lugares (el elegido resaltado) y lo de abajo */
+	void DrawStatus( CWindowGc &gc, const CFont *font ) const
+	{
+		TInt lh = font->HeightInPixels() + 1, i;
+		TInt y = font->AscentInPixels() + 3;
+		if( iSlots )
+		{
+			/* si no entra todo, se corre para que se vea el lugar elegido (y lo de abajo, en el ultimo) */
+			TInt head = ( iLines ? iLines->Count() : 0 ) * lh, slot = 2 * lh + 3;
+			TInt total = head + ESlots * slot + 2 + ( iFoot ? iFoot->Count() : 0 ) * lh + 4;
+			TInt h = Rect().Height(), off = 0;
+			TInt bottom = head + ( iSel + 1 ) * slot + 4;
+			if( bottom > h ) off = bottom - h;
+			if( iSel == ESlots - 1 && total > h ) off = total - h;
+			y -= off;
+		}
+		y = DrawLines( gc, font, iLines, y );
+		if( !iSlots )
+			return;
+		for( i = 0; i < ESlots && 2 * i + 1 < iSlots->Count(); i++ )
+		{
+			TRect r( TPoint( 1, y - font->AscentInPixels() - 2 ), TSize( Rect().Width() - 2, 2 * lh + 2 ));
+			if( i == iSel )
+			{
+				gc.SetBrushStyle( CGraphicsContext::ESolidBrush );
+				gc.SetBrushColor( TRgb( 30, 110, 220 ));
+				gc.SetPenStyle( CGraphicsContext::ENullPen );
+				gc.DrawRect( r );
+				gc.SetPenStyle( CGraphicsContext::ESolidPen );
+				gc.SetBrushStyle( CGraphicsContext::ENullBrush );
+				gc.SetPenColor( KRgbWhite );
+			}
+			else
+				gc.SetPenColor( KRgbBlack );
+			gc.DrawText( ( *iSlots )[2 * i], TPoint( 4, y ));
+			{
+				/* "conectado" en verde; lo que sigue (la bateria), del color de siempre */
+				TPtrC st = ( *iSlots )[2 * i + 1];
+				TPtrC con = Txt( ETxtConnected );
+				TRgb normal = i == iSel ? KRgbWhite : TRgb( 90, 90, 90 );
+				if( st.Left( con.Length()) == con )
+				{
+					gc.SetPenColor( i == iSel ? TRgb( 140, 255, 140 ) : TRgb( 0, 150, 0 ));
+					gc.DrawText( con, TPoint( 4, y + lh ));
+					gc.SetPenColor( normal );
+					gc.DrawText( st.Mid( con.Length()), TPoint( 4 + font->TextWidthInPixels( con ), y + lh ));
+				}
+				else
+				{
+					gc.SetPenColor( normal );
+					gc.DrawText( st, TPoint( 4, y + lh ));
+				}
+			}
+			y += 2 * lh + 3;
+		}
+		gc.SetPenColor( KRgbBlack );
+		DrawLines( gc, font, iFoot, y + 2 );
 	}
 
 	TInt DrawLines( CWindowGc &gc, const CFont *font, const CDesCArray *aLines, TInt y ) const
 	{
+		gc.SetPenColor( KRgbBlack );
 		TInt i;
 		for( i = 0; aLines && i < aLines->Count(); i++ )
 		{
@@ -743,6 +864,10 @@ private:
 	TInt              iPadRate, iPadRateBase;
 	TUint             iPadRateTick;
 	const CDesCArray *iLines;
+	const CDesCArray *iSlots;
+	const CDesCArray *iFoot;
+	MSlotObserver    *iObs;
+	TInt              iSel;
 	TInt              iEventErr;
 	TInt              iEvents;
 	CFbsBitmap       *iCursor;
@@ -774,6 +899,12 @@ public:
 	{
 		if( IsActive()) return;
 		iMgr.Search( iStatus, aType );
+		SetActive();
+	}
+	void StartPad( TInt aSlot )
+	{
+		if( IsActive()) return;
+		iMgr.SearchPad( iStatus, aSlot );
 		SetActive();
 	}
 	TInt LastError() const { return iLast; }
@@ -905,7 +1036,7 @@ private:
 	TInt                    iCommand;
 };
 
-class CMgrAppUi : public CAknAppUi
+class CMgrAppUi : public CAknAppUi, public MSlotObserver
 {
 public:
 	void ConstructL()
@@ -915,6 +1046,8 @@ public:
 
 		BaseConstructL( EAknEnableSkin );
 		iLines = new( ELeave ) CDesCArrayFlat( 8 );
+		iSlots = new( ELeave ) CDesCArrayFlat( 2 * ESlots );
+		iFoot = new( ELeave ) CDesCArrayFlat( 4 );
 		iView = new( ELeave ) CMgrView;
 		iView->ConstructL( ClientRect());
 		AddToStackL( iView );
@@ -945,8 +1078,86 @@ public:
 			delete iView;
 		}
 		delete iLines;
+		delete iSlots;
+		delete iFoot;
 	}
 	void Refresh();
+
+	/* el centro sobre un lugar: lo que se puede hacer con el (agregar uno, conectar, desconectar, quitar) */
+	void SlotSelectedL( TInt aSlot )
+	{
+		enum { EActAdd, EActConnect, EActDisconnect, EActRemove, EActMove1 };
+		CDesCArrayFlat *items;
+		TInt acts[4 + EBtHidMaxPads], n = 0, sel, k;
+		if( iConnectErr != KErrNone || aSlot < 0 || aSlot >= ESlots )
+			return;
+		items = new( ELeave ) CDesCArrayFlat( 4 );
+		CleanupStack::PushL( items );
+		if( !iSlotUsed[aSlot] )
+		{
+			items->AppendL( Txt( aSlot == ESlotMouse ? ETxtMenuPickMouse : aSlot == ESlotKeyboard ? ETxtMenuPickKeys
+				: ETxtSlotAddPad ));
+			acts[n++] = EActAdd;
+		}
+		else
+		{
+			TInt st = iSlotState[aSlot];
+			if( st != EBtHidConnected )
+			{
+				items->AppendL( Txt( ETxtSlotConnect ));
+				acts[n++] = EActConnect;
+			}
+			if( st != EBtHidStopped )
+			{
+				items->AppendL( Txt( ETxtSlotDisconnect ));
+				acts[n++] = EActDisconnect;
+			}
+			// un joystick: pasarlo a otro numero (si estaba ocupado, se intercambian)
+			for( k = 0; k < EBtHidMaxPads && aSlot >= ESlotPad1; k++ )
+			{
+				TBuf<40> b;
+				if( ESlotPad1 + k == aSlot )
+					continue;
+				b.Format( Txt( ETxtSlotMove ), k + 1 );
+				items->AppendL( b );
+				acts[n++] = EActMove1 + k;
+			}
+			items->AppendL( Txt( ETxtSlotRemove ));
+			acts[n++] = EActRemove;
+		}
+		// (la lista se refresca sola cada segundo: lo de este lugar se copia antes de preguntar)
+		TBuf8<6> addr = iSlotAddr[aSlot];
+		TBuf<64> heading = ( *iSlots )[2 * aSlot].Left( 64 );
+		sel = AskListL( *items, heading, 0 );
+		CleanupStack::PopAndDestroy( items );
+		if( sel < 0 || sel >= n )
+			return;
+		switch( acts[sel] )
+		{
+		case EActAdd:
+			if( aSlot == ESlotMouse ) iSearch->Start( EBtHidMouse );
+			else if( aSlot == ESlotKeyboard ) iSearch->Start( EBtHidKeyboard );
+			else iSearch->StartPad( aSlot - ESlotPad1 + 1 );
+			break;
+		case EActConnect:
+			iMgr.DeviceCommand( addr, EBtHidCmdConnect );
+			break;
+		case EActDisconnect:
+			iMgr.DeviceCommand( addr, EBtHidCmdDisconnect );
+			break;
+		case EActRemove:
+			iMgr.DeviceCommand( addr, EBtHidCmdRemove );
+			break;
+		default:
+			if( acts[sel] >= EActMove1 )
+			{
+				iMgr.DeviceCommand( addr, EBtHidCmdMoveToPad + acts[sel] - EActMove1 + 1 );
+				iView->Select( ESlotPad1 + acts[sel] - EActMove1 ); // (la seleccion va con el)
+			}
+			break;
+		}
+		Refresh();
+	}
 
 private:
 	static TInt Tick( TAny *aPtr ) { static_cast<CMgrAppUi *>( aPtr )->Refresh(); return 1; }
@@ -1478,6 +1689,11 @@ private:
 
 	RBtHidManager  iMgr;
 	TInt           iConnectErr;
+	CDesCArray    *iSlots;      // dos renglones por lugar
+	CDesCArray    *iFoot;
+	TBool          iSlotUsed[ESlots];
+	TInt           iSlotState[ESlots];
+	TBuf8<6>       iSlotAddr[ESlots];
 	CMgrView      *iView;
 	CDesCArray    *iLines;
 	CSearch       *iSearch;
@@ -1500,97 +1716,114 @@ void CMgrAppUi::Refresh()
 {
 	TBtHidStatusPckg st;
 	TBuf<96>         line;
-	TInt             i;
+	TInt             i, slot;
 
 	iLines->Reset();
-	AddLine( _L( "Bluetooth HID" ));
+	iSlots->Reset();
+	iFoot->Reset();
+	line.Copy( _L8( "Bluetooth HID " BTHID_VERSION ));
+	AddLine( line );
 	if( iConnectErr != KErrNone )
 	{
 		line.Format( Txt( ETxtNoServer ), iConnectErr );
 		AddLine( line );
 		iView->SetLines( iLines );
+		iView->SetSlots( NULL, NULL, NULL );
 		return;
 	}
 	if( iMgr.Status( st ) != KErrNone )
 	{
 		AddLine( Txt( ETxtServerDead ));
 		iView->SetLines( iLines );
+		iView->SetSlots( NULL, NULL, NULL );
 		return;
 	}
 
-	// un renglon fijo para el mouse y otro para el teclado ("ninguno" si no hay), con su estado abajo
-	for( TInt slot = EBtHidMouse; slot <= EBtHidKeyboard; slot++ )
+	/* cada lugar: los joysticks por su numero de jugador (los que todavia no tienen, en el primero libre), el mouse
+	   (los guardados sin tipo cuentan como mouse) y el teclado */
+	const TBtHidDeviceInfo *dev[ESlots];
+	for( slot = 0; slot < ESlots; slot++ )
+		dev[slot] = NULL;
+	for( i = 0; i < st().iCount; i++ )
 	{
-		TPtrC kind = Txt( slot == EBtHidKeyboard ? ETxtKeyboard : ETxtMouse );
-		const TBtHidDeviceInfo *d = NULL;
-		for( i = 0; i < st().iCount; i++ )
-		{
-			TInt type = st().iDevice[i].iType ? st().iDevice[i].iType : EBtHidMouse; // sin tipo = mouse
-			if( type == slot )
-				d = &st().iDevice[i];
-		}
+		const TBtHidDeviceInfo *d = &st().iDevice[i];
+		TInt type = d->iType ? d->iType : EBtHidMouse;
+		if( type == EBtHidMouse ) dev[ESlotMouse] = d;
+		else if( type == EBtHidKeyboard ) dev[ESlotKeyboard] = d;
+		else if( type == EBtHidGamepad && d->iPlayer >= 1 && d->iPlayer <= EBtHidMaxPads && !dev[ESlotPad1 + d->iPlayer - 1] )
+			dev[ESlotPad1 + d->iPlayer - 1] = d;
+	}
+	for( i = 0; i < st().iCount; i++ )
+	{
+		const TBtHidDeviceInfo *d = &st().iDevice[i];
+		TBool placed = EFalse;
+		if( d->iType != EBtHidGamepad )
+			continue;
+		for( slot = ESlotPad1; slot < ESlots; slot++ )
+			if( dev[slot] == d ) placed = ETrue;
+		for( slot = ESlotPad1; slot < ESlots && !placed; slot++ )
+			if( !dev[slot] ) { dev[slot] = d; placed = ETrue; }
+	}
+	for( slot = 0; slot < ESlots; slot++ )
+	{
+		const TBtHidDeviceInfo *d = dev[slot];
+		TBuf<32> kind, name;
+		if( slot == ESlotMouse ) kind = Txt( ETxtMouse );
+		else if( slot == ESlotKeyboard ) kind = Txt( ETxtKeyboard );
+		else kind.Format( Txt( ETxtPad ), slot - ESlotPad1 + 1 );
+		iSlotUsed[slot] = d != NULL;
+		iSlotState[slot] = d ? d->iState : EBtHidDisconnected;
+		iSlotAddr[slot].Zero();
 		if( !d )
 		{
-			TPtrC none = Txt( ETxtNone );
+			TPtrC none = Txt( ETxtSlotEmpty );
 			line.Format( _L( "%S: %S" ), &kind, &none );
-			AddLine( line );
+			TRAP_IGNORE( iSlots->AppendL( line ));
+			TRAP_IGNORE( iSlots->AppendL( KNullDesC ));
 			continue;
 		}
-		TBuf<32> name;
+		iSlotAddr[slot].Copy( d->iAddr, 6 );
 		name.Copy( d->iName );
 		if( !name.Length())
 			name.Format( _L( "%02x:%02x:%02x:%02x:%02x:%02x" ), d->iAddr[0], d->iAddr[1], d->iAddr[2], d->iAddr[3], d->iAddr[4], d->iAddr[5] );
 		line.Format( _L( "%S: %S" ), &kind, &name );
-		AddLine( line );
+		TRAP_IGNORE( iSlots->AppendL( line ));
 		if( d->iState == EBtHidConnected )
-			AddLine( Txt( ETxtConnected ));
-		else if( d->iState == EBtHidConnecting )
-			AddLine( Txt( ETxtConnecting ));
+		{
+			line = Txt( ETxtConnected );
+			if( d->iType == EBtHidGamepad && d->iCharging )
+				line.Append( Txt( ETxtCharging ));
+			else if( d->iType == EBtHidGamepad && d->iBattery >= 0 )
+			{
+				TBuf<32> b;
+				b.Format( Txt( ETxtBattery ), d->iBattery );
+				line.Append( b );
+			}
+			else if( d->iType == EBtHidGamepad )
+				line.Append( Txt( ETxtBatteryNone )); // (no la informa: algunos compatibles)
+		}
+		else if( d->iState == EBtHidStopped )
+			line = Txt( ETxtSlotStopped );
 		else if( d->iState == EBtHidWaiting )
-			AddLine( Txt( ETxtWaiting ));
+			line = Txt( d->iType == EBtHidGamepad ? ETxtSlotStopped : ETxtWaiting );
+		else if( d->iType == EBtHidGamepad )
+			line = Txt( ETxtSlotCalling );
+		else if( d->iState == EBtHidConnecting )
+			line = Txt( ETxtConnecting );
 		else
-		{
 			line.Format( Txt( ETxtNotConnected ), d->iError );
-			AddLine( line );
-		}
+		TRAP_IGNORE( iSlots->AppendL( line ));
 	}
-	{
-		TInt pad = 0;
-		for( i = 0; i < st().iCount; i++ )
-		{
-			const TBtHidDeviceInfo *d = &st().iDevice[i];
-			if( d->iType != EBtHidGamepad )
-				continue;
-			TBuf<32> name, kind;
-			/* el numero es el de jugador: por orden de conexion (sin conectar todavia, sin numero) */
-			if( d->iPlayer > 0 )
-				kind.Format( Txt( ETxtPad ), d->iPlayer );
-			else
-				kind = Txt( ETxtPadNoNum );
-			pad++;
-			name.Copy( d->iName );
-			if( !name.Length())
-				name.Format( _L( "%02x:%02x:%02x:%02x:%02x:%02x" ), d->iAddr[0], d->iAddr[1], d->iAddr[2], d->iAddr[3], d->iAddr[4], d->iAddr[5] );
-			line.Format( _L( "%S: %S" ), &kind, &name );
-			AddLine( line );
-			AddLine( d->iState == EBtHidConnected ? Txt( ETxtConnected ) : d->iState == EBtHidWaiting ? Txt( ETxtWaiting ) : Txt( ETxtConnecting ));
-		}
-	}
+	TRAP_IGNORE( iFoot->AppendL( Txt( ETxtSlotHelp )));
 	line.Format( Txt( ETxtApps ), st().iClients );
-	AddLine( line );
+	TRAP_IGNORE( iFoot->AppendL( line ));
 	if( iSearch->LastError() != KErrNone && iSearch->LastError() != KErrCancel )
 	{
 		line.Format( Txt( ETxtSearchFailed ), iSearch->LastError());
-		AddLine( line );
+		TRAP_IGNORE( iFoot->AppendL( line ));
 	}
-	for( i = 0; i < st().iCount; i++ )
-		if( st().iDevice[i].iState != EBtHidConnected && st().iDevice[i].iState != EBtHidWaiting )
-		{
-			AddLine( Txt( ETxtHint1 ));
-			AddLine( Txt( ETxtHint2 ));
-			break;
-		}
 	iView->SetLines( iLines );
+	iView->SetSlots( iSlots, iFoot, this );
 }
 
 /* ------------------------------------------------------------------ */

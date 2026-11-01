@@ -42,6 +42,7 @@ const TInt   KMaxHidDesc      = 512;
 const TUint8 KHidpDataInput   = 0xA1;  // HIDP DATA, reporte de entrada
 const TInt   KRetryFirstUs    = 3000000;
 const TInt   KRetryUs         = 8000000;
+const TInt   KRetryPadUs      = 4000000;
 const TInt   KRetrySlowUs     = 60000000; // despues de varios fallos: casi todos los mouse no contestan si los
                                           // llama el telefono, se conectan ellos al moverlos; llamar seguido
                                           // ocupa la radio y no los deja entrar
@@ -135,15 +136,20 @@ public:
 	const TBTDevAddr &Addr() const { return iAddr; }
 	TInt Type() const { return iType; }
 	const TDesC8 &Name() const { return iName; }
-	TInt State() const { return iConnected ? EBtHidConnected : iState == EWaitDevice ? EBtHidWaiting
-		: iState == EWaitRetry ? EBtHidDisconnected : EBtHidConnecting; }
+	TInt State() const { return iConnected ? EBtHidConnected : iStopped ? EBtHidStopped : iState == EWaitDevice
+		? EBtHidWaiting : iState == EWaitRetry ? EBtHidDisconnected : EBtHidConnecting; }
+	TInt Battery() const { return iConnected ? iPadBattery : -1; }
+	TBool Charging() const { return iConnected && iPadCharging; }
+	// desconectado a mano: no se lo llama (si llama el, se lo atiende igual)
+	void Stop();
+	void Resume();
 	TInt Flags() const { return iFlags; }
-	// los joysticks de PS3 / PS4: se reconectan llamando ellos (al apretar PS)
+	// los joysticks de PS3: se reconectan llamando ellos (al apretar PS) y no contestan si se los llama. (Los de PS4
+	// al reves: al apretar PS esperan que los llame el telefono)
 	TBool CallsBack() const
 	{
-		return iType == EBtHidGamepad && ( iPadKind == EBtHidPadPs3 || iPadKind == EBtHidPadPs4
-			|| iName.FindF( _L8( "PS3" )) >= 0 || iName.FindF( _L8( "PLAYSTATION" )) >= 0
-			|| iName.FindF( _L8( "Wireless Controller" )) >= 0 );
+		return iType == EBtHidGamepad && ( iPadKind == EBtHidPadPs3 || iName.FindF( _L8( "PS3" )) >= 0
+			|| iName.FindF( _L8( "PLAYSTATION(R)3" )) >= 0 );
 	}
 	TInt Player() const { return iPlayer; }
 	void SetPlayer( TInt aPlayer ) { iPlayer = aPlayer; }
@@ -153,6 +159,7 @@ public:
 	// joystick: estado, vibracion
 	void PadState( TBtHidPadState &aState ) const;
 	void SetRumble( TBool aOn );
+	void Light() { PadOutput(); }   // (la luz de su numero, al cambiarlo de lugar)
 
 private:
 	enum TState { EIdle, EConnCtrl, EConnIntr, ESetProto, EReading, EWaitRetry, EWaitIntr, EWaitDevice };
@@ -217,6 +224,12 @@ private:
 	TUint8      iPadKeysDown[CBtHidHost::EPadKeyInputs]; // teclas del modo teclado apretadas (usos HID)
 	TInt        iPadKeysCount;
 	TInt        iPadStick;       // el stick izquierdo como flechas (bits arriba derecha abajo izquierda)
+	TInt        iPadBattery;     // en % (-1 = no se sabe)
+	TBool       iPadCharging;
+	TBool       iStopped;        // desconectado a mano
+	TBool       iPadFullAsked;   // (DualShock 4: ya se le pidio el reporte completo en esta conexion)
+	TBool       iPadFullSeen;    // (y ya llego uno: al log)
+	TInt        iPadBatLogged;   // la ultima bateria anotada en el log (-1 = ninguna)
 public:
 	void PadKeys();              // el modo teclado: las teclas de lo apretado ahora
 	void ReleasePadKeys();
@@ -240,6 +253,7 @@ CBtHidDevice::CBtHidDevice( CBtHidHost &aHost, const TBTDevAddr &aAddr, TInt aTy
 	CActiveScheduler::Add( this );
 	iTimerOpen = iTimer.CreateLocal() == KErrNone;
 	Mem::FillZ( iKeys, sizeof( iKeys ));
+	iPadBattery = -1;
 }
 
 CBtHidDevice::~CBtHidDevice()
@@ -296,6 +310,18 @@ void CBtHidDevice::Start()
 {
 	TInt err;
 
+	if( iStopped )
+		return;
+	if( iHost.Searching() && iTimerOpen )
+	{
+		// (el cuadro de busqueda esta abierto: llamar ocuparia la radio y no aparecerian los dispositivos)
+		Cancel();
+		CloseSockets();
+		iState = EWaitRetry;
+		iTimer.After( iStatus, 3000000 );
+		SetActive();
+		return;
+	}
 	Cancel();
 	CloseSockets();
 	delete iSdp; // de la conexion anterior
@@ -337,6 +363,28 @@ void CBtHidDevice::Wait()
 	Log( "esperando que se conecte", KErrNone );
 }
 
+void CBtHidDevice::Stop()
+{
+	Log( "desconectado a mano", KErrNone );
+	iStopped = ETrue;
+	Cancel();
+	ReleaseAll();
+	CloseSockets();
+	iConnected = EFalse;
+	iState = EWaitDevice; // (si llama el, se lo atiende)
+}
+
+void CBtHidDevice::Resume()
+{
+	iStopped = EFalse;
+	iFails = 0;
+	if( !iConnected )
+	{
+		Log( "conectar: llamandolo", KErrNone );
+		Start();
+	}
+}
+
 /* primera conexion un poco despues: recien elegido en el cuadro, la radio todavia esta terminando la busqueda */
 void CBtHidDevice::StartAfter( TInt aMicroSeconds )
 {
@@ -358,8 +406,12 @@ void CBtHidDevice::ConnectChannel( RSocket &aSock, TUint aPsm )
 
 	// los teclados exigen cifrado (y emparejar con codigo). A los mouse no les pedimos nada: muchos no usan
 	// seguridad y cortaban la conexion; si el mouse la quiere, la pide el y el telefono empareja igual
-	sec.SetAuthentication( iType == EBtHidKeyboard );
-	sec.SetEncryption( iType == EBtHidKeyboard );
+	/* el joystick de PS4 tambien: recien elegido (en modo emparejar) no la pide, pero al reconectarse si (sin ella
+	   abre los canales, no manda nada y corta con -6305, falla de autenticacion). Emparejado una vez, se reconecta
+	   con la clave guardada. (El de PS3 no: se empareja por USB con ds3pair) */
+	const TBool auth = iType == EBtHidKeyboard || ( iType == EBtHidGamepad && !CallsBack());
+	sec.SetAuthentication( auth );
+	sec.SetEncryption( auth );
 	sec.SetAuthorisation( EFalse );
 	addr.SetBTAddr( iAddr );
 	addr.SetPort( aPsm );
@@ -389,9 +441,14 @@ void CBtHidDevice::Retry( TInt aErr )
 		Log( iState == EConnCtrl ? "fallo el canal de control" : iState == EConnIntr ? "fallo el canal de datos"
 			: iState == EWaitIntr ? "llego el control pero no los datos" : "fallo la conexion", aErr );
 	iFails++;
-	/* los joysticks de PS3 y PS4 no contestan cuando se los llama: al apretar PS llaman ellos. Recien cortados se
-	   los llama un par de veces (por si fue un corte con el joystick prendido); despues se los espera con la radio
-	   libre: si se los sigue llamando (~5 s de radio por intento) su llamada choca y no conectan nunca */
+	/* desconectado a mano: no se lo llama, pero si llama el se lo atiende */
+	if( iStopped )
+	{
+		iState = EWaitDevice;
+		return;
+	}
+	/* el joystick de PS3 no contesta cuando se lo llama: al apretar PS llama el. Recien cortado se lo llama un par
+	   de veces (por si fue un corte con el prendido); despues se lo espera con la radio libre */
 	if( CallsBack() && iFails >= 3 )
 	{
 		iState = EWaitDevice;
@@ -403,10 +460,10 @@ void CBtHidDevice::Retry( TInt aErr )
 	if( !iTimerOpen )
 		return;
 	// recien cortado el dispositivo esta despierto: volver a llamarlo ya
-	/* un joystick apagado: se lo sigue llamando cada 8 s un rato (al prenderlo conecta solo) y despues cada 30 s,
-	   para no ocupar la radio todo el tiempo (el mouse llama el y necesita la radio libre) */
+	/* un joystick de PS4 al apretar PS espera un rato que lo llame el telefono: se lo llama cada 4 s, siempre
+	   (cada intento ocupa la radio ~5 s: un intervalo largo dejaba pasar ese rato y no reconectaba) */
 	if( iType == EBtHidGamepad )
-		iTimer.After( iStatus, dropped ? 500000 : iFails < 20 ? KRetryUs : 30000000 );
+		iTimer.After( iStatus, dropped ? 500000 : KRetryPadUs );
 	else
 		iTimer.After( iStatus, dropped ? 500000 : iFails < 3 ? KRetryFirstUs : iFails < 6 ? KRetryUs : KRetrySlowUs );
 	SetActive();
@@ -441,6 +498,10 @@ void CBtHidDevice::RunL()
 		iRawLogged = 0;
 		Log( iType == EBtHidGamepad ? "conectado" : iProtoBoot ? "conectado (protocolo boot)" : "conectado (reportes del descriptor)", err );
 		iPadReports = 0;
+		iPadFullAsked = EFalse;
+		iPadFullSeen = EFalse;
+		iPadBattery = -1;
+		iPadBatLogged = -1;
 		if( iType == EBtHidGamepad )
 		{
 			iHost.AssignPlayer( this );
@@ -489,6 +550,7 @@ void CBtHidDevice::SetProtocol()
 void CBtHidDevice::AdoptCtrl( RSocket &aSock )
 {
 	Log( "llamo: canal de control", KErrNone );
+	iStopped = EFalse; // (desconectado a mano y llamo el: se apreto PS, se lo quiere)
 	Cancel();
 	ReleaseAll();
 	CloseSockets();
@@ -841,6 +903,13 @@ void CBtHidDevice::PadReport( const TDesC8 &aData )
 		if( p[5] & 1 ) b |= 1 << EBtHidPadPS;
 		for( i = 0; i < 4; i++ )
 			iPadAxis[i] = p[7 + i];
+		/* la bateria: [31] 0..5 (0xEE cargando, 0xEF cargado) */
+		if( n > 31 )
+		{
+			TInt v = p[31];
+			iPadCharging = v == 0xEE || v == 0xEF;
+			iPadBattery = v == 0xEF ? 100 : v == 0xEE ? -1 : v <= 5 ? v * 20 : -1;
+		}
 		Mem::FillZ( iPadPressure, sizeof( iPadPressure ));
 		for( i = 0; i < 12; i++ )
 			iPadPressure[press[i]] = p[15 + i];
@@ -849,6 +918,58 @@ void CBtHidDevice::PadReport( const TDesC8 &aData )
 	{
 		/* DualShock 4: el corto (A1 01, 9 bytes) o el completo (A1 11 C0 00 ...) */
 		const TUint8 *q;
+		if( p[1] == 0x01 && n >= 11 && !iPadFullAsked && iConnected && iCtrlOpen )
+		{
+			/* el corto no trae la bateria: pedirle el feature 0x02 (la calibracion) lo pasa al completo */
+			static const TUint8 get[2] = { 0x43, 0x02 }; // GET_REPORT feature 0x02
+			TRequestStatus st;
+			iPadFullAsked = ETrue;
+			iPadCmd.Copy( get, sizeof( get ));
+			iCtrl.Write( iPadCmd, st );
+			User::WaitForRequest( st );
+			Log( "pidiendo el reporte completo (bateria)", st.Int());
+			/* la respuesta (por el canal de control): al log, para saber si este joystick lo tiene (algunos
+			   compatibles no). Se espera hasta 300 ms */
+			if( iTimerOpen )
+			{
+				TBuf8<64>      resp;
+				TSockXfrLength len;
+				TRequestStatus rst, tst;
+				RTimer         t;
+				if( t.CreateLocal() == KErrNone )
+				{
+					iCtrl.RecvOneOrMore( resp, 0, rst, len );
+					t.After( tst, 300000 );
+					User::WaitForRequest( rst, tst );
+					if( rst == KRequestPending )
+					{
+						iCtrl.CancelRecv();
+						User::WaitForRequest( rst );
+						Log( "sin respuesta al pedido del reporte completo", KErrTimedOut );
+					}
+					else
+					{
+						t.Cancel();
+						User::WaitForRequest( tst );
+						TBuf8<120> msg;
+						msg.Format( _L8( "respuesta %d bytes:" ), resp.Length());
+						for( TInt k = 0; k < resp.Length() && k < 16; k++ )
+							msg.AppendFormat( _L8( " %02x" ), resp[k] );
+						iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+					}
+					t.Close();
+				}
+			}
+		}
+		if( p[1] == 0x11 && !iPadFullSeen )
+		{
+			TBuf8<120> msg;
+			iPadFullSeen = ETrue;
+			msg.Format( _L8( "reporte completo %d bytes:" ), n );
+			for( TInt k = 0; k < n && k < 40; k++ )
+				msg.AppendFormat( _L8( " %02x" ), p[k] );
+			iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+		}
 		if( p[1] == 0x01 && n >= 11 ) q = p + 2;
 		else if( p[1] == 0x11 && n >= 13 ) q = p + 4;
 		else return;
@@ -867,6 +988,14 @@ void CBtHidDevice::PadReport( const TDesC8 &aData )
 				if( q[5] & ( 1 << i )) b |= 1 << bits[i];
 		}
 		if( q[6] & 1 ) b |= 1 << EBtHidPadPS;
+		/* la bateria (solo en el completo): los 4 bits bajos de [29] de 0 a 10 (11 cargado), el bit 4 enchufado */
+		if( p[1] == 0x11 && n >= 4 + 30 )
+		{
+			TInt v = q[29];
+			TInt level = v & 0x0F;
+			iPadCharging = ( v & 0x10 ) != 0;
+			iPadBattery = level >= 10 ? 100 : level * 10;
+		}
 		/* presion: la de L2 y R2 es analogica; los demas, 255 apretado */
 		for( i = 0; i < EBtHidPadButtons; i++ )
 			iPadPressure[i] = ( b & ( 1 << i )) ? 255 : 0;
@@ -883,6 +1012,12 @@ void CBtHidDevice::PadReport( const TDesC8 &aData )
 	}
 	iPadButtons = b;
 	iPadReports++;
+	/* la bateria al log cuando cambia de a 10 % (para saber si un joystick se apago por la bateria) */
+	if( iPadBattery >= 0 && ( iPadBatLogged < 0 || iPadBattery / 10 != iPadBatLogged / 10 ))
+	{
+		iPadBatLogged = iPadBattery;
+		Log( iPadCharging ? "bateria (cargando)" : "bateria", iPadBattery );
+	}
 	PadKeys();
 	if( iPadKind != kind )
 		PadOutput(); // recien se sabe cual es: su luz (el DualShock 4 la quiere en su formato)
@@ -1450,7 +1585,8 @@ TInt CBtHidHost::DeviceCount() const
 }
 
 /* un dispositivo por tipo: elegir otro mouse reemplaza al anterior */
-void CBtHidHost::AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc, TInt aFlags, TBool aCall )
+void CBtHidHost::AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &aName, const TDesC8 &aDesc, TInt aFlags, TBool aCall,
+	TInt aPlayer )
 {
 	TInt i, slot = -1;
 
@@ -1469,10 +1605,25 @@ void CBtHidHost::AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &a
 	iDev[slot] = new CBtHidDevice( *this, aAddr, aType, aName, aDesc, aFlags );
 	if( !iDev[slot] )
 		return;
+	if( aType == EBtHidGamepad && aPlayer > 0 && aPlayer <= EBtHidMaxPads )
+	{
+		// (el lugar pedido: si otro lo tenia, queda sin numero hasta que se conecte)
+		for( i = 0; i < EMaxDevices; i++ )
+			if( iDev[i] && i != slot && iDev[i]->Type() == EBtHidGamepad && iDev[i]->Player() == aPlayer )
+				iDev[i]->SetPlayer( 0 );
+		iDev[slot]->SetPlayer( aPlayer );
+	}
 	if( aCall )
 		iDev[slot]->StartAfter( 2000000 ); // recien elegido: esta en modo emparejar, hay que llamarlo
 	else
 		iDev[slot]->Wait();
+}
+
+void CBtHidHost::SelectPad( TInt aSlot )
+{
+	SelectDevice( EBtHidGamepad );
+	if( IsActive())
+		iSelectSlot = aSlot;
 }
 
 void CBtHidHost::SelectDevice( TInt aType )
@@ -1480,6 +1631,7 @@ void CBtHidHost::SelectDevice( TInt aType )
 	if( IsActive())
 		return;
 	iSelectType = aType;
+	iSelectSlot = 0;
 	if( !iNotifierOpen )
 	{
 		if( iNotifier.Connect() != KErrNone )
@@ -1524,7 +1676,8 @@ void CBtHidHost::RunL()
 		name.Copy( iResp().DeviceName().Left( name.MaxLength()));
 	iObserver.BtHidLog( type == EBtHidKeyboard ? "teclado elegido" : type == EBtHidMouse ? "mouse elegido"
 		: type == EBtHidGamepad ? "joystick elegido" : "dispositivo elegido" );
-	AddDevice( iResp().BDAddr(), type, name, KNullDesC8, 0, ETrue );
+	AddDevice( iResp().BDAddr(), type, name, KNullDesC8, 0, ETrue, type == EBtHidGamepad ? iSelectSlot : 0 );
+	iSelectSlot = 0;
 	Save();
 	iObserver.BtHidSearchDone( KErrNone );
 }
@@ -1549,6 +1702,8 @@ void CBtHidHost::GetStatus( TBtHidStatus &aStatus ) const
 		info.iError = iDev[i]->Error();
 		info.iName  = iDev[i]->Name();
 		info.iPlayer = iDev[i]->Type() == EBtHidGamepad ? iDev[i]->Player() : 0;
+		info.iBattery = iDev[i]->Type() == EBtHidGamepad ? iDev[i]->Battery() : -1;
+		info.iCharging = iDev[i]->Type() == EBtHidGamepad && iDev[i]->Charging();
 		aStatus.iCount++;
 	}
 }
@@ -1572,6 +1727,43 @@ void CBtHidHost::Forget( TInt aType )
 		}
 	}
 	Save();
+}
+
+TInt CBtHidHost::DeviceCommand( const TBTDevAddr &aAddr, TInt aCommand )
+{
+	TInt i;
+	for( i = 0; i < EMaxDevices; i++ )
+	{
+		if( !iDev[i] || iDev[i]->Addr() != aAddr )
+			continue;
+		if( aCommand == EBtHidCmdRemove )
+		{
+			delete iDev[i];
+			iDev[i] = NULL;
+			Save();
+		}
+		else if( aCommand == EBtHidCmdDisconnect )
+			iDev[i]->Stop();
+		else if( aCommand == EBtHidCmdConnect )
+			iDev[i]->Resume();
+		else if( aCommand > EBtHidCmdMoveToPad && aCommand <= EBtHidCmdMoveToPad + EBtHidMaxPads
+			&& iDev[i]->Type() == EBtHidGamepad )
+		{
+			// el que tenia ese lugar se lleva el de este; los dos cambian la luz
+			TInt to = aCommand - EBtHidCmdMoveToPad, from = iDev[i]->Player(), j;
+			for( j = 0; j < EMaxDevices; j++ )
+				if( iDev[j] && j != i && iDev[j]->Type() == EBtHidGamepad && iDev[j]->Player() == to )
+				{
+					iDev[j]->SetPlayer( from );
+					iDev[j]->Light();
+				}
+			iDev[i]->SetPlayer( to );
+			iDev[i]->Light();
+			Save();
+		}
+		return KErrNone;
+	}
+	return KErrNotFound;
 }
 
 void CBtHidHost::ForgetAll()
@@ -1632,7 +1824,7 @@ void CBtHidHost::Load()
 				break;
 		}
 		AddDevice( TBTDevAddr( data.Mid( i, 6 )), data[i + 6], data.Mid( i + 8, len ),
-			dlen ? data.Mid( pos, dlen ) : KNullDesC8(), flags, EFalse );
+			dlen ? data.Mid( pos, dlen ) : KNullDesC8(), flags & 0x0F, EFalse, ( flags >> 4 ) & 7 );
 		i = pos + dlen;
 	}
 	delete buf;
@@ -1657,7 +1849,8 @@ void CBtHidHost::Save()
 		data.Append( (TUint8)iDev[i]->Type());
 		data.Append( (TUint8)iDev[i]->Name().Length());
 		data.Append( iDev[i]->Name());
-		data.Append( (TUint8)iDev[i]->Flags());
+		// (los bits altos: el lugar del joystick, su numero de jugador)
+		data.Append( (TUint8)(( iDev[i]->Flags() & 0x0F ) | ( iDev[i]->Type() == EBtHidGamepad ? ( iDev[i]->Player() & 7 ) << 4 : 0 )));
 		data.Append( (TUint8)( desc.Length() & 0xff ));
 		data.Append( (TUint8)( desc.Length() >> 8 ));
 		data.Append( desc );

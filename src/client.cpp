@@ -165,4 +165,14 @@ EXPORT_C TInt RBtHidManager::SetPadKeys( TBool aOn )
 	return SendReceive( EBtHidPadKeys, TIpcArgs( aOn ));
 }
 
+EXPORT_C void RBtHidManager::SearchPad( TRequestStatus &aStatus, TInt aSlot )
+{
+	SendReceive( EBtHidSearchPad, TIpcArgs( aSlot ), aStatus );
+}
+
+EXPORT_C TInt RBtHidManager::DeviceCommand( const TDesC8 &aAddr, TInt aCommand )
+{
+	return SendReceive( EBtHidDeviceCmd, TIpcArgs( &aAddr, aCommand ));
+}
+
 #endif // BTHID_HINKKA_COMPAT

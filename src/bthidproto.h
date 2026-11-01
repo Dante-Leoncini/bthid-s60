@@ -24,7 +24,9 @@ enum TBtHidOpcode
 	EBtHidForget,       // arg0 = tipo
 	EBtHidPadState,     // arg0 = joystick (0-3), arg1 = TBtHidPadStatePckg
 	EBtHidPadRumble,    // arg0 = joystick, arg1 = prendida
-	EBtHidPadKeys       // arg0 = modo teclado prendido
+	EBtHidPadKeys,      // arg0 = modo teclado prendido
+	EBtHidSearchPad,    // async: cuadro de busqueda para un joystick, arg0 = su lugar (1-4)
+	EBtHidDeviceCmd     // arg0 = la direccion (6 bytes), arg1 = TBtHidDeviceCommand
 };
 
 // arranca bthidhostsrv.exe y espera a que este listo (si ya corre, devuelve KErrNone igual)

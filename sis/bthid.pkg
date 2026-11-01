@@ -3,7 +3,7 @@
 
 ; con el UID de paquete del "Bluetooth HID support" de Hinkka (y una version mas alta): se instala como su
 ; actualizacion y lo reemplaza. Su hidsrv.dll queda reemplazado por el nuestro, asi las apps viejas siguen andando
-#{"Bluetooth HID"},(0xa00054c4),2,7,0
+#{"Bluetooth HID"},(0xa00054c4),2,8,0
 
 [0x101F7961], 0, 0, 0, {"S60ProductID"} ; S60v3
 [0x1028315F], 0, 0, 0, {"S60ProductID"} ; ^1

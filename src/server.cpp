@@ -34,7 +34,8 @@ public:
 	void DropSession( CBtHidSession *aSession );
 	void Push( const THIDEvent &aEvent );
 	CBtHidHost *Host() { return iHost; }
-	void Search( const RMessage2 &aMessage );
+	// aSlot: el lugar del joystick que se busca (1-4; 0 = cualquier dispositivo, aMessage.Int0() es su tipo)
+	void Search( const RMessage2 &aMessage, TInt aSlot = 0 );
 	void CancelSearch( CBtHidSession *aSession );
 	TInt Clients() const;
 	// lo arranco el telefono al prender (la lista de inicio): sin dispositivos guardados no hace falta seguir
@@ -198,6 +199,19 @@ void CBtHidSession::ServiceL( const RMessage2 &aMessage )
 		return;
 	case EBtHidSearch:
 		Server().Search( aMessage );
+		return;
+	case EBtHidSearchPad:
+		Server().Search( aMessage, aMessage.Int0() < 1 ? 1 : aMessage.Int0() > EBtHidMaxPads ? EBtHidMaxPads : aMessage.Int0());
+		return;
+	case EBtHidDeviceCmd:
+		{
+			TBuf8<6> addr;
+			aMessage.ReadL( 0, addr );
+			TInt err = KErrNotFound;
+			if( Server().Host() && addr.Length() == 6 )
+				err = Server().Host()->DeviceCommand( TBTDevAddr( addr ), aMessage.Int1());
+			aMessage.Complete( err );
+		}
 		return;
 	case EBtHidCancelSearch:
 		Server().CancelSearch( this );
@@ -371,7 +385,7 @@ void CBtHidServer::Push( const THIDEvent &aEvent )
 		s->Push( aEvent );
 }
 
-void CBtHidServer::Search( const RMessage2 &aMessage )
+void CBtHidServer::Search( const RMessage2 &aMessage, TInt aSlot )
 {
 	if( !iHost )
 	{
@@ -385,7 +399,10 @@ void CBtHidServer::Search( const RMessage2 &aMessage )
 	}
 	iSearchMsg = aMessage;
 	iSearchSession = static_cast<CBtHidSession *>( aMessage.Session());
-	iHost->SelectDevice( aMessage.Int0());
+	if( aSlot > 0 )
+		iHost->SelectPad( aSlot );
+	else
+		iHost->SelectDevice( aMessage.Int0());
 }
 
 void CBtHidServer::CancelSearch( CBtHidSession *aSession )

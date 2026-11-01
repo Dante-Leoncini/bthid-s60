@@ -9,8 +9,14 @@ Los juegos no necesitan esto: cargan bthidhost.dll y usan la API de siempre (bth
 #include <e32base.h>
 
 enum TBtHidDeviceType   { EBtHidUnknown = 0, EBtHidMouse = 1, EBtHidKeyboard = 2, EBtHidGamepad = 3 };
-// EBtHidWaiting: el dispositivo se reconecta solo (HIDReconnectInitiate); el telefono no lo llama, lo espera
-enum TBtHidDeviceState  { EBtHidDisconnected = 0, EBtHidConnecting = 1, EBtHidConnected = 2, EBtHidWaiting = 3 };
+// EBtHidWaiting: el dispositivo se reconecta solo (HIDReconnectInitiate); el telefono no lo llama, lo espera.
+// EBtHidStopped: desconectado a mano (desde la app): no se lo llama hasta que se pida conectarlo o llame el
+enum TBtHidDeviceState  { EBtHidDisconnected = 0, EBtHidConnecting = 1, EBtHidConnected = 2, EBtHidWaiting = 3,
+                          EBtHidStopped = 4 };
+// lo que se le puede pedir a un dispositivo (RBtHidManager::DeviceCommand)
+enum TBtHidDeviceCommand { EBtHidCmdDisconnect = 1, EBtHidCmdConnect = 2, EBtHidCmdRemove = 3,
+                           // un joystick al lugar N (1-4): EBtHidCmdMoveToPad + N (si estaba ocupado, se intercambian)
+                           EBtHidCmdMoveToPad = 0x10 };
 
 struct TBtHidDeviceInfo
 {
@@ -19,7 +25,9 @@ struct TBtHidDeviceInfo
 	TInt      iState;  // TBtHidDeviceState
 	TInt      iError;  // ultimo error de conexion (0 = ninguno)
 	TBuf8<32> iName;
-	TInt      iPlayer; // joystick: numero de jugador 1-4, por orden de conexion (0 = no se conecto todavia)
+	TInt      iPlayer; // joystick: su lugar, el numero de jugador 1-4 (0 = todavia no tiene)
+	TInt      iBattery;  // joystick: la bateria en % (-1 = no se sabe)
+	TInt      iCharging; // joystick: enchufado (cargando)
 };
 
 struct TBtHidStatus
@@ -74,6 +82,8 @@ public:
 	IMPORT_C void Search( TRequestStatus &aStatus );
 	// lo mismo, eligiendo que es (EBtHidMouse / EBtHidKeyboard): reemplaza al que habia de ese tipo
 	IMPORT_C void Search( TRequestStatus &aStatus, TInt aType );
+	// buscar un joystick para el lugar aSlot (1-4): ese va a ser su numero de jugador
+	IMPORT_C void SearchPad( TRequestStatus &aStatus, TInt aSlot );
 	IMPORT_C void CancelSearch();
 	IMPORT_C TInt ForgetAll();
 	// olvidar el mouse o el teclado
@@ -86,6 +96,8 @@ public:
 	// modo teclado: cada boton de los joysticks manda una tecla (c:\data\bthid_teclas.txt) a las apps que usan la
 	// API del hidsrv (bthidclient.h); las que piden el estado del joystick (PadState) no reciben esas teclas
 	IMPORT_C TInt SetPadKeys( TBool aOn );
+	// desconectar, conectar o quitar el dispositivo con esa direccion (6 bytes): TBtHidDeviceCommand
+	IMPORT_C TInt DeviceCommand( const TDesC8 &aAddr, TInt aCommand );
 };
 
 #endif // BTHIDMANAGER_H
