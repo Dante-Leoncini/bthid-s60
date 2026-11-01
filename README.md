@@ -32,6 +32,41 @@ directo al dispositivo, lee los reportes tal cual vienen y manda apretado al apr
 El paquete usa el UID del "Bluetooth HID support" de Hinkka (`0xA00054C4`) con una version mas alta: se instala
 como su actualizacion y lo reemplaza.
 
+## El joystick como teclado
+
+Con *Opciones > Joystick como teclado: si*, los botones de los joysticks (DualShock 3 y 4, hasta 4) mandan teclas.
+Llegan a TODAS las apps y al menu del telefono, como si fueran las del teclado del telefono (el servidor las inyecta
+al sistema con `RWsSession::SimulateRawEvent`, por eso pide la capacidad `SwEvent`). A la app que esta adelante, si
+lee los joysticks directo (`RBtHidManager::PadState`), no se le mandan: asi un juego que usa el joystick no recibe todo
+dos veces.
+
+Las teclas por defecto (el perfil *Predeterminado*):
+
+| Boton | Joystick 1 | Joystick 2 | Joystick 3 | Joystick 4 |
+|---|---|---|---|---|
+| Cruceta y stick izquierdo (arriba, abajo, izquierda, derecha) | flechas del telefono | 8 2 4 6 | I K J L | Inicio Fin Suprimir AvPag |
+| Cruz (X) | **OK** (el centro) | A | N | A |
+| Cuadrado | 2 | B | O | B |
+| Circulo | 3 | C | P | C |
+| Triangulo | 4 | D | Q | D |
+| Start | 0 | E | R | E |
+| R1 | tecla de abajo derecha | F | S | F |
+| L1 | tecla de abajo izquierda | G | T | G |
+| R2 | 5 | H | U | H |
+| L2 | 6 | I | V | I |
+| Select | 7 | J | W | J |
+| PS | tecla de menu (cambiar de app) | K | X | K |
+| R3 | 8 | L | Y | L |
+| L3 | 9 | M | Z | M |
+
+Con el joystick 1 se maneja el telefono entero: el menu, las listas, las teclas de abajo de la pantalla y los
+numeros. Si en el telefono quedo el archivo de teclas o el *Predeterminado* de una version anterior sin tocar, se
+reemplazan solos por estos; los perfiles editados no se tocan.
+
+Los perfiles se editan en la app (*Opciones > Perfiles del joystick*): cada boton de cada joystick con una tecla de
+teclado (letras, numeros, flechas, F1..F12...) o del telefono (OK, las de abajo de la pantalla, menu, llamar, colgar,
+C, * y #). El que esta en uso queda en `c:\data\bthid_teclas.txt` (renglones `joystick boton tecla`).
+
 ## Usarlo desde una app
 
 Igual que con el de Hinkka, cambiando el nombre de la DLL (y dejando el de Hinkka como respaldo):

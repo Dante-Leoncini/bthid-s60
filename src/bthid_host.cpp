@@ -1037,12 +1037,12 @@ _LIT8( KPadKeysDefault,
 	"1 stick_arriba arriba\r\n1 stick_abajo abajo\r\n1 stick_izquierda izquierda\r\n1 stick_derecha derecha\r\n"
 	"1 cruz ok\r\n1 cuadrado 2\r\n1 circulo 3\r\n1 triangulo 4\r\n1 start 0\r\n1 r1 soft_der\r\n1 l1 soft_izq\r\n"
 	"1 r2 5\r\n1 l2 6\r\n1 select 7\r\n1 ps menu\r\n1 r3 8\r\n1 l3 9\r\n"
-	"2 arriba i\r\n2 abajo k\r\n2 izquierda j\r\n2 derecha l\r\n"
-	"2 stick_arriba i\r\n2 stick_abajo k\r\n2 stick_izquierda j\r\n2 stick_derecha l\r\n"
+	"2 arriba 8\r\n2 abajo 2\r\n2 izquierda 4\r\n2 derecha 6\r\n"
+	"2 stick_arriba 8\r\n2 stick_abajo 2\r\n2 stick_izquierda 4\r\n2 stick_derecha 6\r\n"
 	"2 cruz a\r\n2 cuadrado b\r\n2 circulo c\r\n2 triangulo d\r\n2 start e\r\n2 r1 f\r\n2 l1 g\r\n"
 	"2 r2 h\r\n2 l2 i\r\n2 select j\r\n2 ps k\r\n2 r3 l\r\n2 l3 m\r\n"
-	"3 arriba 8\r\n3 abajo 2\r\n3 izquierda 4\r\n3 derecha 6\r\n"
-	"3 stick_arriba 8\r\n3 stick_abajo 2\r\n3 stick_izquierda 4\r\n3 stick_derecha 6\r\n"
+	"3 arriba i\r\n3 abajo k\r\n3 izquierda j\r\n3 derecha l\r\n"
+	"3 stick_arriba i\r\n3 stick_abajo k\r\n3 stick_izquierda j\r\n3 stick_derecha l\r\n"
 	"3 cruz n\r\n3 cuadrado o\r\n3 circulo p\r\n3 triangulo q\r\n3 start r\r\n3 r1 s\r\n3 l1 t\r\n"
 	"3 r2 u\r\n3 l2 v\r\n3 select w\r\n3 ps x\r\n3 r3 y\r\n3 l3 z\r\n"
 	"4 arriba inicio\r\n4 abajo fin\r\n4 izquierda suprimir\r\n4 derecha pgabajo\r\n"
@@ -1050,13 +1050,16 @@ _LIT8( KPadKeysDefault,
 	"4 cruz a\r\n4 cuadrado b\r\n4 circulo c\r\n4 triangulo d\r\n4 start e\r\n4 r1 f\r\n4 l1 g\r\n"
 	"4 r2 h\r\n4 l2 i\r\n4 select j\r\n4 ps k\r\n4 r3 l\r\n4 l3 m\r\n" );
 
-/* el archivo de las versiones 0.3 a 0.5 sin tocar (el joystick 1 con letras) o el de la primera 0.6 (la cruz era el
-   1 y Start el OK): se cambia por el de ahora */
+/* el archivo de las versiones 0.3 a 0.5 sin tocar (el joystick 1 con letras) o el de las primeras 0.6 (la cruz era
+   el 1 y Start el OK; las flechas del joystick 2 pisaban sus botones): se cambia por el de ahora */
 static TBool PadKeysViejo( const TDesC8 &aText )
 {
 	if( aText.Find( _L8( "1 cruz z" )) >= 0 && aText.Find( _L8( "1 circulo x" )) >= 0 && aText.Find( _L8( "1 ps esc" )) >= 0 )
 		return ETrue;
-	return aText.Find( _L8( "1 cruz 1" )) >= 0 && aText.Find( _L8( "1 start ok" )) >= 0;
+	if( aText.Find( _L8( "1 cruz 1" )) >= 0 && aText.Find( _L8( "1 start ok" )) >= 0 )
+		return ETrue;
+	// (y el de la 0.6 con las flechas del joystick 2 en I K J L, que pisaban sus botones L2, Select, PS y R3)
+	return aText.Find( _L8( "2 arriba i" )) >= 0 && aText.Find( _L8( "2 l2 i" )) >= 0;
 }
 
 static TInt PadInputByName( const TDesC8 &aName )
