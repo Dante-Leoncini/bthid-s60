@@ -138,6 +138,13 @@ public:
 	TInt State() const { return iConnected ? EBtHidConnected : iState == EWaitDevice ? EBtHidWaiting
 		: iState == EWaitRetry ? EBtHidDisconnected : EBtHidConnecting; }
 	TInt Flags() const { return iFlags; }
+	// los joysticks de PS3 / PS4: se reconectan llamando ellos (al apretar PS)
+	TBool CallsBack() const
+	{
+		return iType == EBtHidGamepad && ( iPadKind == EBtHidPadPs3 || iPadKind == EBtHidPadPs4
+			|| iName.FindF( _L8( "PS3" )) >= 0 || iName.FindF( _L8( "PLAYSTATION" )) >= 0
+			|| iName.FindF( _L8( "Wireless Controller" )) >= 0 );
+	}
 	TInt Player() const { return iPlayer; }
 	void SetPlayer( TInt aPlayer ) { iPlayer = aPlayer; }
 	TInt Error() const { return iError; }
@@ -382,6 +389,16 @@ void CBtHidDevice::Retry( TInt aErr )
 		Log( iState == EConnCtrl ? "fallo el canal de control" : iState == EConnIntr ? "fallo el canal de datos"
 			: iState == EWaitIntr ? "llego el control pero no los datos" : "fallo la conexion", aErr );
 	iFails++;
+	/* los joysticks de PS3 y PS4 no contestan cuando se los llama: al apretar PS llaman ellos. Recien cortados se
+	   los llama un par de veces (por si fue un corte con el joystick prendido); despues se los espera con la radio
+	   libre: si se los sigue llamando (~5 s de radio por intento) su llamada choca y no conectan nunca */
+	if( CallsBack() && iFails >= 3 )
+	{
+		iState = EWaitDevice;
+		if( iFails == 3 )
+			Log( "esperando que llame (apretar PS)", KErrNone );
+		return;
+	}
 	iState = EWaitRetry;
 	if( !iTimerOpen )
 		return;
