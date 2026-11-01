@@ -1024,27 +1024,40 @@ void CBtHidDevice::PadState( TBtHidPadState &aState ) const
 _LIT( KPadKeysFile, "c:\\data\\bthid_teclas.txt" );
 _LIT( KPadKeysOnFile, "c:\\private\\e0d69650\\teclas.dat" );
 _LIT8( KPadKeysDefault,
-	"# Joystick como teclado (Bluetooth HID): que tecla manda cada boton de cada joystick (1 a 4)\r\n"
-	"# Se usa con Opciones > Joystick como teclado: si. Despues de editarlo, apagarlo y prenderlo otra vez.\r\n"
+	"# Joystick como teclado (Bluetooth HID 0.6): que tecla manda cada boton de cada joystick (1 a 4)\r\n"
+	"# Se usa con Opciones > Joystick como teclado: si. Las teclas llegan a todas las apps y al menu del telefono\r\n"
+	"# (menos a la que esta adelante si lee el joystick directo). Despues de editarlo, apagarlo y prenderlo.\r\n"
 	"# Renglones: joystick boton tecla\r\n"
 	"# Botones: arriba abajo izquierda derecha cruz circulo cuadrado triangulo l1 r1 l2 r2 select start l3 r3 ps\r\n"
 	"#          stick_arriba stick_abajo stick_izquierda stick_derecha (el stick izquierdo)\r\n"
 	"# Teclas: una letra o un numero, o enter esc espacio tab borrar arriba abajo izquierda derecha ctrl shift alt\r\n"
 	"#         f1 ... f12 inicio fin pgarriba pgabajo insertar suprimir coma punto ninguna\r\n"
+	"#         y las del telefono: ok soft_izq soft_der menu verde rojo tecla_c asterisco numeral\r\n"
 	"1 arriba arriba\r\n1 abajo abajo\r\n1 izquierda izquierda\r\n1 derecha derecha\r\n"
 	"1 stick_arriba arriba\r\n1 stick_abajo abajo\r\n1 stick_izquierda izquierda\r\n1 stick_derecha derecha\r\n"
-	"1 cruz z\r\n1 circulo x\r\n1 cuadrado a\r\n1 triangulo s\r\n1 l1 q\r\n1 r1 w\r\n1 l2 e\r\n1 r2 r\r\n"
-	"1 select espacio\r\n1 start enter\r\n1 l3 1\r\n1 r3 2\r\n1 ps esc\r\n"
+	"1 cruz ok\r\n1 cuadrado 2\r\n1 circulo 3\r\n1 triangulo 4\r\n1 start 0\r\n1 r1 soft_der\r\n1 l1 soft_izq\r\n"
+	"1 r2 5\r\n1 l2 6\r\n1 select 7\r\n1 ps menu\r\n1 r3 8\r\n1 l3 9\r\n"
 	"2 arriba i\r\n2 abajo k\r\n2 izquierda j\r\n2 derecha l\r\n"
 	"2 stick_arriba i\r\n2 stick_abajo k\r\n2 stick_izquierda j\r\n2 stick_derecha l\r\n"
-	"2 cruz v\r\n2 circulo b\r\n2 cuadrado f\r\n2 triangulo g\r\n2 l1 t\r\n2 r1 y\r\n2 l2 u\r\n2 r2 o\r\n"
-	"2 select n\r\n2 start m\r\n2 l3 3\r\n2 r3 4\r\n2 ps borrar\r\n"
+	"2 cruz a\r\n2 cuadrado b\r\n2 circulo c\r\n2 triangulo d\r\n2 start e\r\n2 r1 f\r\n2 l1 g\r\n"
+	"2 r2 h\r\n2 l2 i\r\n2 select j\r\n2 ps k\r\n2 r3 l\r\n2 l3 m\r\n"
 	"3 arriba 8\r\n3 abajo 2\r\n3 izquierda 4\r\n3 derecha 6\r\n"
 	"3 stick_arriba 8\r\n3 stick_abajo 2\r\n3 stick_izquierda 4\r\n3 stick_derecha 6\r\n"
-	"3 cruz c\r\n3 circulo d\r\n3 cuadrado h\r\n3 triangulo p\r\n3 select 5\r\n3 start 7\r\n"
+	"3 cruz n\r\n3 cuadrado o\r\n3 circulo p\r\n3 triangulo q\r\n3 start r\r\n3 r1 s\r\n3 l1 t\r\n"
+	"3 r2 u\r\n3 l2 v\r\n3 select w\r\n3 ps x\r\n3 r3 y\r\n3 l3 z\r\n"
 	"4 arriba inicio\r\n4 abajo fin\r\n4 izquierda suprimir\r\n4 derecha pgabajo\r\n"
 	"4 stick_arriba inicio\r\n4 stick_abajo fin\r\n4 stick_izquierda suprimir\r\n4 stick_derecha pgabajo\r\n"
-	"4 cruz coma\r\n4 circulo punto\r\n4 cuadrado 9\r\n4 triangulo 0\r\n4 select tab\r\n4 start insertar\r\n" );
+	"4 cruz a\r\n4 cuadrado b\r\n4 circulo c\r\n4 triangulo d\r\n4 start e\r\n4 r1 f\r\n4 l1 g\r\n"
+	"4 r2 h\r\n4 l2 i\r\n4 select j\r\n4 ps k\r\n4 r3 l\r\n4 l3 m\r\n" );
+
+/* el archivo de las versiones 0.3 a 0.5 sin tocar (el joystick 1 con letras) o el de la primera 0.6 (la cruz era el
+   1 y Start el OK): se cambia por el de ahora */
+static TBool PadKeysViejo( const TDesC8 &aText )
+{
+	if( aText.Find( _L8( "1 cruz z" )) >= 0 && aText.Find( _L8( "1 circulo x" )) >= 0 && aText.Find( _L8( "1 ps esc" )) >= 0 )
+		return ETrue;
+	return aText.Find( _L8( "1 cruz 1" )) >= 0 && aText.Find( _L8( "1 start ok" )) >= 0;
+}
 
 static TInt PadInputByName( const TDesC8 &aName )
 {
@@ -1065,7 +1078,11 @@ static TInt PadKeyByName( const TDesC8 &aName )
 		{ "enter", 40 }, { "esc", 41 }, { "borrar", 42 }, { "tab", 43 }, { "espacio", 44 }, { "menos", 45 },
 		{ "igual", 46 }, { "coma", 54 }, { "punto", 55 }, { "insertar", 73 }, { "inicio", 74 }, { "pgarriba", 75 },
 		{ "suprimir", 76 }, { "fin", 77 }, { "pgabajo", 78 }, { "derecha", 79 }, { "izquierda", 80 }, { "abajo", 81 },
-		{ "arriba", 82 }, { "ctrl", 224 }, { "shift", 225 }, { "alt", 226 }, { "ninguna", 0 } };
+		{ "arriba", 82 }, { "ctrl", 224 }, { "shift", 225 }, { "alt", 226 }, { "ninguna", 0 },
+		/* las del telefono (bthidmanager.h) */
+		{ "ok", EBtHidPhoneOk }, { "soft_izq", EBtHidPhoneSoftLeft }, { "soft_der", EBtHidPhoneSoftRight },
+		{ "menu", EBtHidPhoneMenu }, { "verde", EBtHidPhoneYes }, { "rojo", EBtHidPhoneNo },
+		{ "tecla_c", EBtHidPhoneClear }, { "asterisco", EBtHidPhoneStar }, { "numeral", EBtHidPhoneHash } };
 	TInt i;
 	if( aName.Length() == 1 )
 	{
@@ -1105,10 +1122,15 @@ void CBtHidHost::LoadPadKeys()
 			f.Read( p );
 		}
 		f.Close();
+		if( buf && PadKeysViejo( *buf ))
+		{
+			delete buf;
+			buf = NULL;
+		}
 	}
-	else if( f.Replace( fs, KPadKeysFile, EFileWrite ) == KErrNone )
+	if( !buf && f.Replace( fs, KPadKeysFile, EFileWrite ) == KErrNone )
 	{
-		/* la primera vez: el archivo con las teclas de siempre, para poder editarlo */
+		/* la primera vez (o el de una version vieja sin tocar): el archivo con las teclas de ahora, para editarlo */
 		f.Write( KPadKeysDefault );
 		f.Close();
 		buf = KPadKeysDefault().Alloc();

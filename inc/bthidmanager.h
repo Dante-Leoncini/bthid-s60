@@ -34,6 +34,13 @@ typedef TPckgBuf<TBtHidStatus> TBtHidStatusPckg;
 
 /* joysticks (DualShock 3 y 4 y los genericos que hablan como ellos): hasta 4, numerados por orden */
 enum { EBtHidMaxPads = 4 };
+// las teclas del TELEFONO en el modo teclado (no estan en la pagina de teclado HID, que llega hasta 0xE7): el
+// servidor las manda como las del teclado del telefono (ok, las de abajo de la pantalla, la de menu...)
+enum TBtHidPhoneKey
+	{
+	EBtHidPhoneOk = 0xF0, EBtHidPhoneSoftLeft, EBtHidPhoneSoftRight, EBtHidPhoneMenu, EBtHidPhoneYes, EBtHidPhoneNo,
+	EBtHidPhoneClear, EBtHidPhoneStar, EBtHidPhoneHash
+	};
 enum TBtHidPadKind { EBtHidPadNone = 0, EBtHidPadUnknown = 1, EBtHidPadPs3 = 3, EBtHidPadPs4 = 4 };
 enum TBtHidPadButton
 {

@@ -3,7 +3,7 @@ TARGET          bthidhostsrv.exe
 TARGETTYPE      exe
 UID             0 0xe0d69650
 VENDORID        0
-CAPABILITY      LocalServices
+CAPABILITY      LocalServices SwEvent
 
 EPOCSTACKSIZE   0x5000
 EPOCHEAPSIZE    0x1000 0x100000
@@ -22,6 +22,7 @@ SOURCE          bthid_host.cpp
 SOURCE          hidparse.cpp
 
 LIBRARY         euser.lib
+LIBRARY         ws32.lib
 LIBRARY         efsrv.lib
 LIBRARY         esock.lib
 LIBRARY         bluetooth.lib

@@ -12,6 +12,8 @@ que se va la ultima app.
 
 #include <e32base.h>
 #include <f32file.h>
+#include <e32keys.h>
+#include <w32std.h>
 #include "bthidproto.h"
 #include "bthidevent.h"
 #include "bthid_host.h"
@@ -54,8 +56,14 @@ private:
 	CSession2 *NewSessionL( const TVersion &aVersion, const RMessage2 &aMessage ) const;
 	static TInt Shutdown( TAny * );
 
+	// el modo teclado al SISTEMA: la tecla como si fuera del telefono (a la app de adelante y al menu)
+	TBool SendRawKey( TInt aUsage, TBool aDown );
+	TBool ForegroundIsPadUser();
+
 	CBtHidHost    *iHost;
 	CPeriodic     *iShutdown;
+	RWsSession     iWs;
+	TBool          iWsOpen;
 	TInt           iSessions;
 	TInt           iButtons;
 	RMessagePtr2   iSearchMsg;
@@ -267,6 +275,10 @@ void CBtHidServer::ConstructL()
 	StartL( KBtHidServerName );
 	BtHidLog( "servidor arrancado, version " BTHID_VERSION );
 	iShutdown = CPeriodic::NewL( EPriorityIdle );
+	// (la ventana del sistema: las teclas del modo teclado van a todas las apps y al menu)
+	iWsOpen = iWs.Connect() == KErrNone;
+	if( !iWsOpen )
+		BtHidLog( "sin la ventana del sistema: el modo teclado solo llega a las apps conectadas" );
 
 	// los dispositivos elegidos se guardan en la carpeta privada del servidor (c:\private\e0d69650)
 	User::LeaveIfError( fs.Connect());
@@ -283,6 +295,8 @@ CBtHidServer::~CBtHidServer()
 	delete iHost;
 	iHost = NULL;
 	delete iShutdown;
+	if( iWsOpen )
+		iWs.Close();
 }
 
 CSession2 *CBtHidServer::NewSessionL( const TVersion &aVersion, const RMessage2 & ) const
@@ -436,8 +450,71 @@ void CBtHidServer::BtHidKey( TInt aUsage, TBool aDown )
 	Push( ev );
 }
 
+/* el codigo de tecla del telefono (el scan code de TRawEvent) de un uso HID de teclado o de una tecla del telefono */
+static TInt ScanCode( TInt aUsage )
+{
+	static const struct { TUint8 iUsage; TUint16 iScan; } map[] = {
+		{ 40, EStdKeyEnter }, { 41, EStdKeyEscape }, { 42, EStdKeyBackspace }, { 43, EStdKeyTab },
+		{ 44, EStdKeySpace }, { 45, EStdKeyMinus }, { 46, EStdKeyEquals }, { 54, EStdKeyComma },
+		{ 55, EStdKeyFullStop }, { 73, EStdKeyInsert }, { 74, EStdKeyHome }, { 75, EStdKeyPageUp },
+		{ 76, EStdKeyDelete }, { 77, EStdKeyEnd }, { 78, EStdKeyPageDown }, { 79, EStdKeyRightArrow },
+		{ 80, EStdKeyLeftArrow }, { 81, EStdKeyDownArrow }, { 82, EStdKeyUpArrow }, { 224, EStdKeyLeftCtrl },
+		{ 225, EStdKeyLeftShift }, { 226, EStdKeyLeftAlt },
+		{ EBtHidPhoneOk, EStdKeyDevice3 }, { EBtHidPhoneSoftLeft, EStdKeyDevice0 },
+		{ EBtHidPhoneSoftRight, EStdKeyDevice1 }, { EBtHidPhoneMenu, EStdKeyApplication0 },
+		{ EBtHidPhoneYes, EStdKeyYes }, { EBtHidPhoneNo, EStdKeyNo }, { EBtHidPhoneClear, EStdKeyBackspace },
+		{ EBtHidPhoneStar, '*' }, { EBtHidPhoneHash, EStdKeyHash } };
+	TInt i;
+	if( aUsage >= 4 && aUsage <= 29 ) return 'A' + aUsage - 4;
+	if( aUsage >= 30 && aUsage <= 38 ) return '1' + aUsage - 30;
+	if( aUsage == 39 ) return '0';
+	if( aUsage >= 58 && aUsage <= 69 ) return EStdKeyF1 + aUsage - 58;
+	for( i = 0; i < (TInt)( sizeof( map ) / sizeof( map[0] )); i++ )
+		if( map[i].iUsage == aUsage )
+			return map[i].iScan;
+	return -1;
+}
+
+/* la app de adelante lee los joysticks directo (PadState)? A esa no se le mandan las teclas */
+TBool CBtHidServer::ForegroundIsPadUser()
+{
+	TThreadId tid;
+	RThread   t;
+	RProcess  p;
+	TBool     pad = EFalse;
+	if( iWs.GetWindowGroupClientThreadId( iWs.GetFocusWindowGroup(), tid ) != KErrNone )
+		return EFalse;
+	if( t.Open( tid ) != KErrNone )
+		return EFalse;
+	if( t.Process( p ) == KErrNone )
+	{
+		pad = IsPadUser( (TUint)p.Id());
+		p.Close();
+	}
+	t.Close();
+	return pad;
+}
+
+TBool CBtHidServer::SendRawKey( TInt aUsage, TBool aDown )
+{
+	TInt scan = ScanCode( aUsage );
+	if( !iWsOpen || scan < 0 )
+		return EFalse;
+	// (soltar siempre: si la tecla se apreto en otra app que no leia el joystick, que no quede apretada)
+	if( aDown && ForegroundIsPadUser())
+		return ETrue;
+	TRawEvent ev;
+	ev.Set( aDown ? TRawEvent::EKeyDown : TRawEvent::EKeyUp, scan );
+	iWs.SimulateRawEvent( ev );
+	iWs.Flush();
+	return ETrue;
+}
+
 void CBtHidServer::BtHidPadKey( TInt aUsage, TBool aDown )
 {
+	// al sistema (todas las apps y el menu); si no se puede (sin la ventana del sistema), a las apps conectadas
+	if( SendRawKey( aUsage, aDown ))
+		return;
 	THIDEvent ev;
 	ev.SetType( THIDEvent::EKeyEvent );
 	THIDKeyEvent *k = ev.Key();

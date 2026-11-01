@@ -1,4 +1,4 @@
-# el icono de la app (qgn_menu_bthid.svg) a \resource\apps\bthidmgr_icon.mif
+# el icono de la app (qgn_menu_bthid.svg; /V3: SVGB, el NVG del SDK de Symbian^3 no se ve en S60 3rd) a \resource\apps\bthidmgr_icon.mif
 ifeq (WINS,$(findstring WINS, $(PLATFORM)))
 ZDIR=$(EPOCROOT)epoc32\release\$(PLATFORM)\$(CFG)\Z
 else
@@ -28,7 +28,7 @@ RESOURCE : $(ICONTARGETFILENAME)
 
 $(ICONTARGETFILENAME) : $(ICONDIR)\qgn_menu_bthid.svg
 	mifconv $(ICONTARGETFILENAME) \
-		/c32 $(ICONDIR)\qgn_menu_bthid.svg
+		/V3 /c32 $(ICONDIR)\qgn_menu_bthid.svg
 
 FREEZE : do_nothing
 

@@ -61,6 +61,16 @@ static const TKeyInfo KKeys[] =
 	{ "insertar", _S( "Insertar" ), _S( "Insert" ), 73 }, { "suprimir", _S( "Suprimir" ), _S( "Delete" ), 76 },
 	{ "coma", _S( "Coma" ), _S( "Comma" ), 54 }, { "punto", _S( "Punto" ), _S( "Period" ), 55 },
 	{ "menos", _S( "Menos" ), _S( "Minus" ), 45 }, { "igual", _S( "Igual" ), _S( "Equals" ), 46 },
+	/* las del telefono */
+	{ "ok", _S( "Tel: OK (centro)" ), _S( "Phone: OK (centre)" ), EBtHidPhoneOk },
+	{ "soft_izq", _S( "Tel: tecla izquierda" ), _S( "Phone: left soft key" ), EBtHidPhoneSoftLeft },
+	{ "soft_der", _S( "Tel: tecla derecha" ), _S( "Phone: right soft key" ), EBtHidPhoneSoftRight },
+	{ "menu", _S( "Tel: men\x00fa" ), _S( "Phone: menu" ), EBtHidPhoneMenu },
+	{ "verde", _S( "Tel: llamar" ), _S( "Phone: call" ), EBtHidPhoneYes },
+	{ "rojo", _S( "Tel: colgar" ), _S( "Phone: end" ), EBtHidPhoneNo },
+	{ "tecla_c", _S( "Tel: C" ), _S( "Phone: C" ), EBtHidPhoneClear },
+	{ "asterisco", _S( "Tel: *" ), _S( "Phone: *" ), EBtHidPhoneStar },
+	{ "numeral", _S( "Tel: #" ), _S( "Phone: #" ), EBtHidPhoneHash },
 };
 static const TInt KNumKeys = sizeof( KKeys ) / sizeof( KKeys[0] );
 
@@ -68,18 +78,20 @@ static const TInt KNumKeys = sizeof( KKeys ) / sizeof( KKeys[0] );
 static const char KDefault[] =
 	"1 arriba arriba\n1 abajo abajo\n1 izquierda izquierda\n1 derecha derecha\n"
 	"1 stick_arriba arriba\n1 stick_abajo abajo\n1 stick_izquierda izquierda\n1 stick_derecha derecha\n"
-	"1 cruz z\n1 circulo x\n1 cuadrado a\n1 triangulo s\n1 l1 q\n1 r1 w\n1 l2 e\n1 r2 r\n"
-	"1 select espacio\n1 start enter\n1 l3 1\n1 r3 2\n1 ps esc\n"
+	"1 cruz ok\n1 cuadrado 2\n1 circulo 3\n1 triangulo 4\n1 start 0\n1 r1 soft_der\n1 l1 soft_izq\n"
+	"1 r2 5\n1 l2 6\n1 select 7\n1 ps menu\n1 r3 8\n1 l3 9\n"
 	"2 arriba i\n2 abajo k\n2 izquierda j\n2 derecha l\n"
 	"2 stick_arriba i\n2 stick_abajo k\n2 stick_izquierda j\n2 stick_derecha l\n"
-	"2 cruz v\n2 circulo b\n2 cuadrado f\n2 triangulo g\n2 l1 t\n2 r1 y\n2 l2 u\n2 r2 o\n"
-	"2 select n\n2 start m\n2 l3 3\n2 r3 4\n2 ps borrar\n"
+	"2 cruz a\n2 cuadrado b\n2 circulo c\n2 triangulo d\n2 start e\n2 r1 f\n2 l1 g\n"
+	"2 r2 h\n2 l2 i\n2 select j\n2 ps k\n2 r3 l\n2 l3 m\n"
 	"3 arriba 8\n3 abajo 2\n3 izquierda 4\n3 derecha 6\n"
 	"3 stick_arriba 8\n3 stick_abajo 2\n3 stick_izquierda 4\n3 stick_derecha 6\n"
-	"3 cruz c\n3 circulo d\n3 cuadrado h\n3 triangulo p\n3 select 5\n3 start 7\n"
+	"3 cruz n\n3 cuadrado o\n3 circulo p\n3 triangulo q\n3 start r\n3 r1 s\n3 l1 t\n"
+	"3 r2 u\n3 l2 v\n3 select w\n3 ps x\n3 r3 y\n3 l3 z\n"
 	"4 arriba inicio\n4 abajo fin\n4 izquierda suprimir\n4 derecha pgabajo\n"
 	"4 stick_arriba inicio\n4 stick_abajo fin\n4 stick_izquierda suprimir\n4 stick_derecha pgabajo\n"
-	"4 cruz coma\n4 circulo punto\n4 cuadrado 9\n4 triangulo 0\n4 select tab\n4 start insertar\n";
+	"4 cruz a\n4 cuadrado b\n4 circulo c\n4 triangulo d\n4 start e\n4 r1 f\n4 l1 g\n"
+	"4 r2 h\n4 l2 i\n4 select j\n4 ps k\n4 r3 l\n4 l3 m\n";
 
 static void Parse( const TDesC8 &aText, TPadProfile &aProf )
 {
@@ -201,9 +213,14 @@ void Profiles::ListL( CDesCArray &aNames )
 	TInt  i;
 
 	aNames.Reset();
-	if( !Exists( KDefaultName ))
+	// (el predeterminado viejo sin tocar se rehace con el de ahora: el de las versiones 0.3 a 0.5, con el joystick 1
+	//  en letras, o el de la primera 0.6, con la cruz en el 1 y Start en OK)
+	TPadProfile p;
+	TBool viejo = Exists( KDefaultName ) && Load( KDefaultName, p ) &&
+	              (( p.iMap[0][EBtHidPadCross] == 29 && p.iMap[0][EBtHidPadCircle] == 27 && p.iMap[0][EBtHidPadPS] == 41 ) ||
+	               ( p.iMap[0][EBtHidPadCross] == 30 && p.iMap[0][EBtHidPadStart] == EBtHidPhoneOk ));
+	if( !Exists( KDefaultName ) || viejo )
 	{
-		TPadProfile p;
 		Default( p );
 		Save( p );
 	}
