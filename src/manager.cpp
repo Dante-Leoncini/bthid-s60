@@ -26,6 +26,7 @@ Textos en ingles o en castellano segun el idioma del telefono.
 #include <gdi.h>
 #include <fbs.h>
 #include <badesca.h>
+#include <eikon.hrh>
 #include <avkon.hrh>
 #include <avkon.rsg>
 #include <bthidmgr.rsg>
@@ -69,6 +70,9 @@ enum TTextId
 	ETxtMenuAutoOn, ETxtMenuAutoOff, ETxtPadNoNum,
 	ETxtSlotEmpty, ETxtSlotAddPad, ETxtSlotConnect, ETxtSlotDisconnect, ETxtSlotRemove, ETxtSlotStopped,
 	ETxtSlotCalling, ETxtBattery, ETxtCharging, ETxtSlotHelp, ETxtSlotOptions, ETxtSlotMove, ETxtBatteryNone,
+	ETxtSlotCallingWii, ETxtWiiHelp, ETxtWiiPage1, ETxtWiiPage2, ETxtWiiNoGyro, ETxtWiiGyro, ETxtWiiLeds,
+	ETxtWiiNoAim, ETxtWiiAim, ETxtWiiShots, ETxtWiiCamera, ETxtWiiScreen, ETxtSlotAddWii, ETxtWiiSearching, ETxtWiiNotFound,
+	ETxtWiiFound,
 	ETxtCount
 };
 
@@ -157,6 +161,22 @@ static const TText *const KTextEn[ETxtCount] =
 	_S( "Options" ),
 	_S( "Move to controller %d" ),
 	_S( "  battery ?" ),
+	_S( "   calling it... (press 1+2)" ),
+	_S( "Up/down: test. Left/right: controller" ),
+	_S( "1/2 Buttons and motion" ),
+	_S( "2/2 Infrared (aim)" ),
+	_S( "Gyro: no MotionPlus" ),
+	_S( "Gyro, deg/s (zeroes when still):" ),
+	_S( "IR points: %d" ),
+	_S( "Aim: an IR LED in each corner" ),
+	_S( "Aim (%d LEDs): " ),
+	_S( "Shots (B): %d  last: " ),
+	_S( "camera" ),
+	_S( "screen" ),
+	_S( "Add a Wiimote here" ),
+	_S( "Looking for a Wiimote: press 1+2" ),
+	_S( "No Wiimote found (press 1+2 and try again)" ),
+	_S( "Wiimote found: connecting" ),
 };
 
 static const TText *const KTextEs[ETxtCount] =
@@ -244,6 +264,22 @@ static const TText *const KTextEs[ETxtCount] =
 	_S( "Opciones" ),
 	_S( "Pasar a joystick %d" ),
 	_S( "  bater\x00ed\x0061 ?" ),
+	_S( "   llam\x00e1ndolo... (apret\x00e1 1+2)" ),
+	_S( "Arriba/abajo: prueba. Izq/der: joystick" ),
+	_S( "1/2 Botones y movimiento" ),
+	_S( "2/2 Infrarrojo (punter\x00ed\x0061)" ),
+	_S( "Giroscopio: sin MotionPlus" ),
+	_S( "Giroscopio, grados/s (cero al quedar quieto):" ),
+	_S( "Puntos IR: %d" ),
+	_S( "Apuntar: un LED IR en cada esquina" ),
+	_S( "Apunta (%d LEDs): " ),
+	_S( "Disparos (B): %d  \x00faltimo: " ),
+	_S( "c\x00e1mara" ),
+	_S( "pantalla" ),
+	_S( "Agregar un Wiimote ac\x00e1" ),
+	_S( "Buscando un Wiimote: apret\x00e1 1+2" ),
+	_S( "No apareci\x00f3 el Wiimote (apret\x00e1 1+2 y prob\x00e1 de nuevo)" ),
+	_S( "Wiimote encontrado: conectando" ),
 };
 
 static TBool gSpanish;
@@ -363,6 +399,19 @@ public:
 		TUint now = User::NTickCount();
 		if( self->iMgr )
 			self->iMgr->PadState( self->iPad, self->iPadSt );
+		if( self->iMgr && self->iPadSt().iKind == EBtHidPadWii )
+		{
+			/* Wiimote: lo suyo, y los disparos nuevos a la lista de marcas (las ultimas 8) */
+			TInt last = self->iWiiSt().iShots;
+			self->iMgr->WiiState( self->iPad, self->iWiiSt );
+			const TBtHidWiiState &w = self->iWiiSt();
+			if( w.iShots != last && w.iShots > 0 )
+			{
+				TInt k = self->iWiiMarks++ % 8;
+				self->iWiiMarkX[k] = w.iShotAim ? w.iShotX : -1;
+				self->iWiiMarkY[k] = w.iShotY;
+			}
+		}
 		if( now - self->iPadRateTick >= 1000 )
 		{
 			self->iPadRate = self->iPadSt().iReports - self->iPadRateBase;
@@ -396,7 +445,16 @@ public:
 		{
 			iPad = ( iPad + ( aKey.iCode == EKeyRightArrow ? 1 : EBtHidMaxPads - 1 )) % EBtHidMaxPads;
 			Mem::FillZ( &iPadSt(), sizeof( TBtHidPadState ));
+			Mem::FillZ( &iWiiSt(), sizeof( TBtHidWiiState ));
+			iWiiMarks = 0;
 			iPadRateBase = 0;
+			DrawDeferred();
+			return EKeyWasConsumed;
+		}
+		/* Wiimote: arriba/abajo, sus dos pruebas */
+		if(( aKey.iCode == EKeyUpArrow || aKey.iCode == EKeyDownArrow ) && iPadSt().iKind == EBtHidPadWii )
+		{
+			iWiiPage = !iWiiPage;
 			DrawDeferred();
 			return EKeyWasConsumed;
 		}
@@ -732,7 +790,8 @@ private:
 		}
 		else
 		{
-			text.Append( st.iKind == EBtHidPadPs3 ? _L( ", PS3" ) : st.iKind == EBtHidPadPs4 ? _L( ", PS4" ) : _L( "" ));
+			text.Append( st.iKind == EBtHidPadPs3 ? _L( ", PS3" ) : st.iKind == EBtHidPadPs4 ? _L( ", PS4" )
+				: st.iKind == EBtHidPadWii ? _L( ", Wii" ) : _L( "" ));
 			text.Append( st.iState == EBtHidConnected ? Txt( ETxtConnected ) : st.iState == EBtHidWaiting
 				? Txt( ETxtWaiting ) : Txt( ETxtConnecting ));
 		}
@@ -747,6 +806,11 @@ private:
 			text.Format( Txt( ETxtPadRumble ), &onoff );
 		}
 		gc.DrawText( text, TPoint( 4, y ));
+		if( st.iKind == EBtHidPadWii )
+		{
+			DrawWiiTest( gc, font, y + lh );
+			return;
+		}
 		y += lh - font->AscentInPixels() + 2;
 
 		/* botones: 9 por fila */
@@ -817,6 +881,226 @@ private:
 		gc.DrawText( Txt( ETxtPadHelp ), TPoint( 4, r.iBr.iY - font->DescentInPixels() - 2 ));
 	}
 
+	/* un numero con decimales y punto (el TRealFormat de siempre usa la coma del idioma) */
+	static void AppendReal( TDes &aText, TReal aValue, TInt aDecimals, TBool aSign = EFalse )
+	{
+		TRealFormat fmt( 10, aDecimals );
+		fmt.iType = KRealFormatFixed;
+		fmt.iTriLen = 0;
+		fmt.iPoint = '.';
+		if( aSign && aValue >= 0 )
+			aText.Append( '+' );
+		aText.AppendNum( aValue, fmt );
+	}
+
+	/* una barra con el cero al medio (aMax a cada lado) */
+	static void DrawCenterBar( CWindowGc &gc, const TRect &aBar, TReal aValue, TReal aMax )
+	{
+		TInt mid = ( aBar.iTl.iX + aBar.iBr.iX ) / 2, half = aBar.Width() / 2;
+		TInt v = (TInt)( aValue / aMax * half );
+		if( v > half ) v = half;
+		if( v < -half ) v = -half;
+		gc.SetPenColor( KRgbBlack );
+		gc.SetBrushStyle( CGraphicsContext::ENullBrush );
+		gc.DrawRect( aBar );
+		gc.SetBrushStyle( CGraphicsContext::ESolidBrush );
+		gc.SetBrushColor( TRgb( 30, 110, 220 ));
+		gc.SetPenStyle( CGraphicsContext::ENullPen );
+		if( v > 0 )
+			gc.DrawRect( TRect( mid, aBar.iTl.iY + 1, mid + v, aBar.iBr.iY - 1 ));
+		else if( v < 0 )
+			gc.DrawRect( TRect( mid + v, aBar.iTl.iY + 1, mid, aBar.iBr.iY - 1 ));
+		gc.SetPenStyle( CGraphicsContext::ESolidPen );
+		gc.SetBrushStyle( CGraphicsContext::ENullBrush );
+		gc.DrawLine( TPoint( mid, aBar.iTl.iY ), TPoint( mid, aBar.iBr.iY ));
+	}
+
+	/* las dos pruebas del Wiimote (arriba/abajo): botones, acelerometro y giroscopio; la camara y a donde apunta */
+	void DrawWiiTest( CWindowGc &gc, const CFont *font, TInt y ) const
+	{
+		const TBtHidWiiState &w = iWiiSt();
+		TRect    r = Rect();
+		TInt     lh = font->HeightInPixels() + 2, asc = font->AscentInPixels(), i;
+		TBuf<80> text;
+
+		gc.SetPenColor( TRgb( 30, 110, 220 ));
+		gc.DrawText( Txt( iWiiPage ? ETxtWiiPage2 : ETxtWiiPage1 ), TPoint( 4, y ));
+		gc.SetPenColor( KRgbBlack );
+		y += lh;
+		if( !iWiiPage )
+		{
+			static const TText *const kNames[EBtHidWiiButtons] = { _S( "^" ), _S( "v" ), _S( "<" ), _S( ">" ),
+				_S( "A" ), _S( "B" ), _S( "1" ), _S( "2" ), _S( "-" ), _S( "+" ), _S( "H" ) };
+			static const TText *const kAxes[3] = { _S( "X" ), _S( "Y" ), _S( "Z" ) };
+			static const TText *const kGyro[3] = { _S( "yaw" ), _S( "roll" ), _S( "pitch" ) };
+			TInt cols = 11, bw = ( r.Width() - 8 ) / cols, label = font->TextWidthInPixels( _L( "pitch -000.0" )) + 8;
+
+			/* botones */
+			for( i = 0; i < EBtHidWiiButtons; i++ )
+			{
+				TRect b( TPoint( 4 + i * bw, y - asc ), TSize( bw - 2, lh ));
+				TBool on = ( w.iButtons & ( 1u << i )) != 0;
+				gc.SetBrushStyle( on ? CGraphicsContext::ESolidBrush : CGraphicsContext::ENullBrush );
+				gc.SetBrushColor( KRgbRed );
+				gc.SetPenColor( KRgbBlack );
+				gc.DrawRect( b );
+				gc.SetBrushStyle( CGraphicsContext::ENullBrush );
+				gc.DrawText( TPtrC( kNames[i] ), TPoint( b.iTl.iX + ( b.Width() - font->TextWidthInPixels( TPtrC( kNames[i] ))) / 2,
+					b.iTl.iY + asc + 1 ));
+			}
+			y += lh + 6;
+
+			/* acelerometro: en g, la barra de -3 a 3 */
+			for( i = 0; i < 3; i++ )
+			{
+				text = TPtrC( kAxes[i] );
+				text.Append( ' ' );
+				AppendReal( text, w.iAccelG[i], 2, ETrue );
+				text.Append( _L( " g" ));
+				gc.DrawText( text, TPoint( 4, y ));
+				DrawCenterBar( gc, TRect( label, y - asc, r.Width() - 4, y - asc + lh - 3 ), w.iAccelG[i], 3.0 );
+				y += lh;
+			}
+			y += 4;
+
+			/* giroscopio: grados por segundo, la barra de -600 a 600 */
+			if( !w.iMotionPlus )
+			{
+				gc.DrawText( Txt( ETxtWiiNoGyro ), TPoint( 4, y ));
+				y += lh;
+			}
+			else
+			{
+				gc.DrawText( Txt( ETxtWiiGyro ), TPoint( 4, y ));
+				y += lh;
+				for( i = 0; i < 3; i++ )
+				{
+					text = TPtrC( kGyro[i] );
+					text.Append( ' ' );
+					AppendReal( text, w.iGyroDps[i], 1, ETrue );
+					gc.DrawText( text, TPoint( 4, y ));
+					DrawCenterBar( gc, TRect( label, y - asc, r.Width() - 4, y - asc + lh - 3 ), w.iGyroDps[i], 600.0 );
+					y += lh;
+				}
+			}
+			if( w.iBattery >= 0 )
+			{
+				text.Format( Txt( ETxtBattery ), w.iBattery );
+				text.TrimLeft();
+				gc.DrawText( text, TPoint( 4, y + 2 ));
+			}
+		}
+		else
+		{
+			/* la camara (como la ve el control, Y para arriba) y la pantalla (16:9) lado a lado */
+			TInt   bw = ( r.Width() - 12 ) / 2;
+			TRect  cam( TPoint( 4, y - asc ), TSize( bw, bw * 3 / 4 ));
+			TRect  scr( TPoint( 8 + bw, y - asc ), TSize( bw, bw * 9 / 16 ));
+			TPoint dot[4];
+			TRgb   aimColor = w.iAim == 4 ? TRgb( 0, 160, 0 ) : TRgb( 230, 120, 0 );
+
+			gc.SetPenColor( KRgbBlack );
+			gc.SetBrushStyle( CGraphicsContext::ESolidBrush );
+			gc.SetBrushColor( TRgb( 20, 20, 20 ));
+			gc.DrawRect( cam );
+			gc.SetBrushColor( TRgb( 235, 240, 250 ));
+			gc.DrawRect( scr );
+			gc.SetBrushStyle( CGraphicsContext::ENullBrush );
+			for( i = 0; i < 4; i++ )
+				dot[i] = TPoint( cam.iTl.iX + w.iIrX[i] * cam.Width() / 1024, cam.iBr.iY - 1 - w.iIrY[i] * cam.Height() / 768 );
+			/* el contorno de las esquinas que se reconocieron, y cada punto con su numero de esquina */
+			if( w.iAim )
+			{
+				gc.SetPenColor( aimColor );
+				for( i = 0; i < 4; i++ )
+				{
+					TInt a = w.iIrCorner[i], b = w.iIrCorner[( i + 1 ) % 4];
+					if( a >= 0 && b >= 0 )
+						gc.DrawLine( dot[a], dot[b] );
+				}
+			}
+			for( i = 0; i < 4; i++ )
+			{
+				TInt c;
+				if( w.iIrX[i] < 0 )
+					continue;
+				gc.SetPenColor( KRgbWhite );
+				gc.SetBrushStyle( CGraphicsContext::ESolidBrush );
+				gc.SetBrushColor( KRgbWhite );
+				gc.DrawEllipse( TRect( dot[i] - TPoint( 2, 2 ), TSize( 5, 5 )));
+				gc.SetBrushStyle( CGraphicsContext::ENullBrush );
+				for( c = 0; c < 4 && w.iIrCorner[c] != i; c++ ) {}
+				if( c < 4 )
+				{
+					text.Num( c + 1 );
+					gc.SetPenColor( TRgb( 255, 230, 0 ));
+					gc.DrawText( text, dot[i] + TPoint( 4, -2 ));
+				}
+			}
+			/* el centro de la camara: a donde apunta el control */
+			gc.SetPenColor( TRgb( 120, 120, 120 ));
+			gc.DrawLine( cam.Center() - TPoint( 4, 0 ), cam.Center() + TPoint( 5, 0 ));
+			gc.DrawLine( cam.Center() - TPoint( 0, 4 ), cam.Center() + TPoint( 0, 5 ));
+
+			/* la pantalla: los disparos (cruces rojas) y la mira */
+			gc.SetClippingRect( scr );
+			gc.SetPenColor( KRgbRed );
+			for( i = 0; i < 8 && i < iWiiMarks; i++ )
+			{
+				if( iWiiMarkX[i] < 0 )
+					continue;
+				TPoint p( scr.iTl.iX + (TInt)( iWiiMarkX[i] * scr.Width()), scr.iTl.iY + (TInt)( iWiiMarkY[i] * scr.Height()));
+				gc.DrawLine( p - TPoint( 3, 3 ), p + TPoint( 4, 4 ));
+				gc.DrawLine( p + TPoint( -3, 3 ), p + TPoint( 4, -4 ));
+			}
+			if( w.iAim )
+			{
+				TReal ax = w.iAimX, ay = w.iAimY;
+				if( ax < 0 ) ax = 0;
+				if( ax > 1 ) ax = 1;
+				if( ay < 0 ) ay = 0;
+				if( ay > 1 ) ay = 1;
+				TPoint p( scr.iTl.iX + (TInt)( ax * ( scr.Width() - 1 )), scr.iTl.iY + (TInt)( ay * ( scr.Height() - 1 )));
+				gc.SetPenColor( aimColor );
+				gc.DrawEllipse( TRect( p - TPoint( 5, 5 ), TSize( 11, 11 )));
+				gc.DrawLine( p - TPoint( 8, 0 ), p + TPoint( 9, 0 ));
+				gc.DrawLine( p - TPoint( 0, 8 ), p + TPoint( 0, 9 ));
+			}
+			gc.CancelClippingRect();
+			gc.SetPenColor( KRgbBlack );
+			y = cam.iBr.iY + asc + 2;
+			gc.DrawText( Txt( ETxtWiiCamera ), TPoint( cam.iTl.iX, y ));
+			gc.DrawText( Txt( ETxtWiiScreen ), TPoint( scr.iTl.iX, scr.iBr.iY + asc + 2 ));
+			y += lh + 2;
+
+			text.Format( Txt( ETxtWiiLeds ), w.iIrCount );
+			gc.DrawText( text, TPoint( 4, y ));
+			y += lh;
+			if( w.iAim )
+			{
+				text.Format( Txt( ETxtWiiAim ), w.iAim );
+				AppendReal( text, w.iAimX, 3 );
+				text.Append( _L( ", " ));
+				AppendReal( text, w.iAimY, 3 );
+			}
+			else
+				text = Txt( ETxtWiiNoAim );
+			gc.DrawText( text, TPoint( 4, y ));
+			y += lh;
+			text.Format( Txt( ETxtWiiShots ), w.iShots );
+			if( w.iShots && w.iShotAim )
+			{
+				AppendReal( text, w.iShotX, 3 );
+				text.Append( _L( ", " ));
+				AppendReal( text, w.iShotY, 3 );
+			}
+			else
+				text.Append( '-' );
+			gc.DrawText( text, TPoint( 4, y ));
+		}
+		gc.DrawText( Txt( ETxtWiiHelp ), TPoint( 4, r.iBr.iY - font->DescentInPixels() - 2 ));
+	}
+
 	void DrawKeysTest( CWindowGc &gc, const CFont *font ) const
 	{
 		static const TText *const kMods[8] = { _S( "Ctrl " ), _S( "Shift " ), _S( "Alt " ), _S( "Win " ),
@@ -861,6 +1145,10 @@ private:
 	CPeriodic        *iPadTimer;
 	TInt              iPad;          // el joystick que se mira (0-3)
 	TBtHidPadStatePckg iPadSt;
+	TBtHidWiiStatePckg iWiiSt;
+	TInt              iWiiPage;      // Wiimote: 0 botones y movimiento, 1 infrarrojo
+	TInt              iWiiMarks;     // disparos marcados (las ultimas 8 marcas, en ronda)
+	TReal32           iWiiMarkX[8], iWiiMarkY[8]; // (X -1 = no se sabia a donde apuntaba)
 	TInt              iPadRate, iPadRateBase;
 	TUint             iPadRateTick;
 	const CDesCArray *iLines;
@@ -898,15 +1186,26 @@ public:
 	void Start( TInt aType )
 	{
 		if( IsActive()) return;
+		iWii = EFalse;
 		iMgr.Search( iStatus, aType );
 		SetActive();
 	}
 	void StartPad( TInt aSlot )
 	{
 		if( IsActive()) return;
+		iWii = EFalse;
 		iMgr.SearchPad( iStatus, aSlot );
 		SetActive();
 	}
+	void StartWii( TInt aSlot )
+	{
+		if( IsActive()) return;
+		iWii = ETrue;
+		iMgr.SearchWii( iStatus, aSlot );
+		SetActive();
+	}
+	// buscando un Wiimote ahora / la ultima busqueda fue de un Wiimote
+	TBool Wii() const { return iWii; }
 	TInt LastError() const { return iLast; }
 
 private:
@@ -916,6 +1215,7 @@ private:
 	RBtHidManager &iMgr;
 	CMgrAppUi     &iUi;
 	TInt           iLast;
+	TBool          iWii;
 };
 
 class CEvents : public CActive
@@ -1083,10 +1383,34 @@ public:
 	}
 	void Refresh();
 
+	/* termino la busqueda del Wiimote: encontrado (se esta conectando) o no aparecio */
+	void WiiSearchDone( TInt aError )
+	{
+		TRAP_IGNORE( NoteL( Txt( aError == KErrNone ? ETxtWiiFound : ETxtWiiNotFound ), aError == KErrNone ));
+	}
+
+	/* la pantalla girada (o cualquier cambio de resolucion): las dos vistas al tamano nuevo y redibujadas */
+	void HandleResourceChangeL( TInt aType )
+	{
+		CAknAppUi::HandleResourceChangeL( aType );
+		if( aType != KEikDynamicLayoutVariantSwitch )
+			return;
+		if( iView )
+		{
+			iView->SetRect( ClientRect());
+			iView->DrawDeferred();
+		}
+		if( iProfView )
+		{
+			iProfView->SetRect( ClientRect());
+			iProfView->DrawDeferred();
+		}
+	}
+
 	/* el centro sobre un lugar: lo que se puede hacer con el (agregar uno, conectar, desconectar, quitar) */
 	void SlotSelectedL( TInt aSlot )
 	{
-		enum { EActAdd, EActConnect, EActDisconnect, EActRemove, EActMove1 };
+		enum { EActAdd, EActConnect, EActDisconnect, EActRemove, EActAddWii, EActMove1 };
 		CDesCArrayFlat *items;
 		TInt acts[4 + EBtHidMaxPads], n = 0, sel, k;
 		if( iConnectErr != KErrNone || aSlot < 0 || aSlot >= ESlots )
@@ -1098,6 +1422,11 @@ public:
 			items->AppendL( Txt( aSlot == ESlotMouse ? ETxtMenuPickMouse : aSlot == ESlotKeyboard ? ETxtMenuPickKeys
 				: ETxtSlotAddPad ));
 			acts[n++] = EActAdd;
+			if( aSlot >= ESlotPad1 )
+			{
+				items->AppendL( Txt( ETxtSlotAddWii ));
+				acts[n++] = EActAddWii;
+			}
 		}
 		else
 		{
@@ -1138,6 +1467,10 @@ public:
 			if( aSlot == ESlotMouse ) iSearch->Start( EBtHidMouse );
 			else if( aSlot == ESlotKeyboard ) iSearch->Start( EBtHidKeyboard );
 			else iSearch->StartPad( aSlot - ESlotPad1 + 1 );
+			break;
+		case EActAddWii:
+			iSearch->StartWii( aSlot - ESlotPad1 + 1 );
+			NoteL( Txt( ETxtWiiSearching ));
 			break;
 		case EActConnect:
 			iMgr.DeviceCommand( addr, EBtHidCmdConnect );
@@ -1710,6 +2043,8 @@ void CSearch::RunL()
 {
 	iLast = iStatus.Int();
 	iUi.Refresh();
+	if( iWii && iLast != KErrCancel )
+		iUi.WiiSearchDone( iLast );
 }
 
 void CMgrAppUi::Refresh()
@@ -1807,7 +2142,7 @@ void CMgrAppUi::Refresh()
 		else if( d->iState == EBtHidWaiting )
 			line = Txt( d->iType == EBtHidGamepad ? ETxtSlotStopped : ETxtWaiting );
 		else if( d->iType == EBtHidGamepad )
-			line = Txt( ETxtSlotCalling );
+			line = Txt( d->iName.Find( _L8( "RVL-CNT" )) >= 0 ? ETxtSlotCallingWii : ETxtSlotCalling );
 		else if( d->iState == EBtHidConnecting )
 			line = Txt( ETxtConnecting );
 		else
@@ -1817,7 +2152,15 @@ void CMgrAppUi::Refresh()
 	TRAP_IGNORE( iFoot->AppendL( Txt( ETxtSlotHelp )));
 	line.Format( Txt( ETxtApps ), st().iClients );
 	TRAP_IGNORE( iFoot->AppendL( line ));
-	if( iSearch->LastError() != KErrNone && iSearch->LastError() != KErrCancel )
+	if( iSearch->IsActive() && iSearch->Wii())
+	{
+		TRAP_IGNORE( iFoot->AppendL( Txt( ETxtWiiSearching )));
+	}
+	else if( iSearch->Wii() && iSearch->LastError() == KErrNotFound )
+	{
+		TRAP_IGNORE( iFoot->AppendL( Txt( ETxtWiiNotFound )));
+	}
+	else if( iSearch->LastError() != KErrNone && iSearch->LastError() != KErrCancel )
 	{
 		line.Format( Txt( ETxtSearchFailed ), iSearch->LastError());
 		TRAP_IGNORE( iFoot->AppendL( line ));

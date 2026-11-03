@@ -175,4 +175,14 @@ EXPORT_C TInt RBtHidManager::DeviceCommand( const TDesC8 &aAddr, TInt aCommand )
 	return SendReceive( EBtHidDeviceCmd, TIpcArgs( &aAddr, aCommand ));
 }
 
+EXPORT_C TInt RBtHidManager::WiiState( TInt aPad, TBtHidWiiStatePckg &aState )
+{
+	return SendReceive( EBtHidWiiState, TIpcArgs( aPad, &aState ));
+}
+
+EXPORT_C void RBtHidManager::SearchWii( TRequestStatus &aStatus, TInt aSlot )
+{
+	SendReceive( EBtHidSearchWii, TIpcArgs( aSlot ), aStatus );
+}
+
 #endif // BTHID_HINKKA_COMPAT

@@ -9,7 +9,7 @@ directo al dispositivo, lee los reportes tal cual vienen y manda apretado al apr
 
 ## Instalar
 
-Instalar `sis/bthid_0.8.sisx` en el telefono (en la memoria del telefono, C:) y reiniciarlo. La app **Bluetooth
+Instalar `sis/bthid_0.10.sisx` en el telefono (en la memoria del telefono, C:) y reiniciarlo. La app **Bluetooth
 HID** muestra en su pantalla principal los lugares Mouse, Teclado y Joystick 1 a 4: arriba y abajo eligen uno y el
 centro abre sus opciones (agregar, conectar, desconectar, pasar a otro numero, quitar). Lo nuevo de cada version esta
 en [CHANGELOG.md](CHANGELOG.md).
@@ -90,6 +90,54 @@ client->EventReady( &iStatus ); // y en RunL: client->GetEvent( ev )
 Los eventos son los mismos `THIDEvent`: `EEventRelativeXY` (dx, dy en `iPosition`), `EEventRelativeWheel`,
 `EEventButtonDown`/`EEventButtonUp` (`iValue` = `EMouseButtonLeft`/`Right`/`Middle`) y las teclas con el codigo
 de uso HID (`EEventHIDKeyDown`/`Up`, `iScanCode`).
+
+## Wiimote
+
+El control de Wii (Nintendo RVL-CNT-01 y el Wii Remote Plus, RVL-CNT-01-TR) se agrega en un lugar de joystick vacio
+con *Agregar un Wiimote aca* y apretando **1+2** en el Wiimote (o el boton rojo de adentro de la tapa de las pilas).
+Mientras parpadean las luces (tantas como bateria tiene) esta esperando; el cuadro de busqueda del telefono no lo
+encuentra, por eso lo busca el servidor: hasta 40 s, sin pedir los nombres (con nombres la busqueda se trababa) y
+alternando la busqueda general y la limitada. Si el Bluetooth esta apagado pregunta si prenderlo. Todo lo que ve va
+al log. Despues queda guardado: el telefono lo llama cada pocos segundos y para conectarlo otra vez basta apretar 1+2. Los Wiimote originales se conectan sin codigo; los demas piden emparejar con un codigo binario
+(la direccion del Wiimote al reves con 1+2, la del telefono al reves con el boton rojo) que el servidor deja en el
+registro Bluetooth del telefono para que se conteste solo. Se prueban las tres formas y la que anda queda.
+
+En *Pruebas > Probar joysticks*, con un Wiimote, arriba y abajo cambian entre sus dos pruebas:
+
+1. **Botones y movimiento:** los 11 botones, el acelerometro en g (calibrado con los datos que trae el control) y,
+   si tiene MotionPlus (o es un Wii Remote Plus), el giroscopio en grados por segundo. El cero del giroscopio se toma
+   solo cada vez que el control queda quieto medio segundo.
+2. **Infrarrojo:** lo que ve la camara (hasta 4 puntos, cada uno con su numero de esquina) y la pantalla con la mira
+   y los ultimos disparos (B).
+
+**Punteria con 4 LEDs:** un LED infrarrojo (940 nm) en cada esquina de la pantalla. Con los 4 a la vista se calcula
+la transformacion de perspectiva de la camara a la pantalla y se sabe a que punto apunta, sin calibrar, desde
+cualquier lugar y con el control girado hasta 75 grados. La camara ve unos 33 x 23 grados: para que entren las 4
+esquinas al apuntar a un borde hay que estar lejos (unas 3 veces el ancho de la pantalla). Si se pierden 1 o 2 LEDs
+se siguen con el movimiento de los otros (menos exacto).
+
+Desde una app, con `RBtHidManager::WiiState( pad, estado )` (`bthidmanager.h`):
+
+```cpp
+TBtHidWiiStatePckg w;
+mgr.WiiState( 0, w );                 // el joystick 1
+if( w().iAim )                        // ve los LEDs: a donde apunta, 0..1 (0,0 arriba a la izquierda)
+	Mira( w().iAimX * ancho, w().iAimY * alto );
+if( w().iShots != iUltimo )           // se apreto B: donde apuntaba en ese momento
+{
+	iUltimo = w().iShots;
+	Disparo( w().iShotX * ancho, w().iShotY * alto );
+}
+```
+
+`iAccelG` (g), `iGyroDps` (grados/s, con `iMotionPlus`) y los puntos de la camara (`iIrX`, `iIrY`) tambien estan
+ahi. `PadState` lo da como un joystick mas: A = cruz, B = R2, 1 = cuadrado, 2 = circulo, - = Select, + = Start,
+Home = PS.
+
+En el modo teclado el Wiimote tiene sus teclas: Home = menu, - y + = las teclas de abajo de la pantalla, A = OK, B,
+1 y 2 = los numeros 1, 2 y 3, la cruceta = las flechas. Acostado (de costado e inclinado hacia uno) la cruceta gira:
+derecha es arriba. Con la pantalla en horizontal las flechas de todos los joysticks se compensan para que arriba
+siga siendo arriba.
 
 ## Compilar
 

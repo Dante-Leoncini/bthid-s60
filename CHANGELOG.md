@@ -3,6 +3,31 @@
 Lo nuevo en cada versión del driver Bluetooth HID para S60 3rd. La versión se ve en la app **Bluetooth HID**, en
 Opciones > Acerca de.
 
+## 0.10 — 2026-11-03
+
+- **Wiimote** (y Wii Remote Plus): se agrega en un lugar de joystick apretando 1+2. Botones, acelerometro,
+  giroscopio (MotionPlus) y la camara infrarroja. Con 4 LEDs infrarrojos en las esquinas de la pantalla se sabe a
+  donde apunta, sin calibrar; cada disparo (B) guarda donde apuntaba. Para las apps: `RBtHidManager::WiiState`.
+- En *Probar joysticks*, con un Wiimote, arriba y abajo cambian entre sus dos pruebas: botones y movimiento, e
+  infrarrojo.
+- **Wiimote como teclado:** Home = menu, - y + = las teclas de abajo de la pantalla, A = OK, B, 1 y 2 = los numeros
+  1, 2 y 3. Acostado (de costado e inclinado hacia uno) la cruceta gira: derecha es arriba.
+- **Pantalla girada:** el modo teclado compensa el giro de las flechas. Antes, en horizontal, arriba era izquierda.
+- *Agregar un Wiimote aca* (en un lugar de joystick vacio): lo busca el servidor, sin el cuadro del telefono, y si el
+  Bluetooth esta apagado pregunta si prenderlo.
+- **Se llama a un dispositivo por vez**, y el primer minuto despues de elegir uno solo se llama a ese. Antes, con
+  otros joysticks guardados y apagados, las llamadas chocaban (-6012) y un joystick recien elegido se quedaba
+  parpadeando en modo emparejar sin conectar nunca.
+
+## 0.9 — 2026-11-01
+
+- **DualShock 4 original:** no manda nada hasta que se le habla. Al conectarse ahora se le pide el reporte completo y
+  se le manda la luz en su formato, sin esperar su primer reporte. Antes quedaba "conectado" pero mudo.
+- Mientras un joystick conectado no mandó nada, sus sticks quedan al centro. Antes quedaban clavados arriba a la
+  izquierda.
+- **Pantalla girada:** la app se adapta al tamaño nuevo y se redibuja. Antes la pantalla de inicio quedaba con el
+  tamaño viejo.
+
 ## 0.8 — 2026-11-01
 
 - **Pantalla principal nueva:** seis lugares fijos, Mouse, Teclado y Joystick 1 a 4. Cada uno dice si está vacío,

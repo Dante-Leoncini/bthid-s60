@@ -49,7 +49,7 @@ enum TBtHidPhoneKey
 	EBtHidPhoneOk = 0xF0, EBtHidPhoneSoftLeft, EBtHidPhoneSoftRight, EBtHidPhoneMenu, EBtHidPhoneYes, EBtHidPhoneNo,
 	EBtHidPhoneClear, EBtHidPhoneStar, EBtHidPhoneHash
 	};
-enum TBtHidPadKind { EBtHidPadNone = 0, EBtHidPadUnknown = 1, EBtHidPadPs3 = 3, EBtHidPadPs4 = 4 };
+enum TBtHidPadKind { EBtHidPadNone = 0, EBtHidPadUnknown = 1, EBtHidPadPs3 = 3, EBtHidPadPs4 = 4, EBtHidPadWii = 5 };
 enum TBtHidPadButton
 {
 	EBtHidPadUp, EBtHidPadRight, EBtHidPadDown, EBtHidPadLeft,
@@ -71,6 +71,48 @@ struct TBtHidPadState
 	TUint8  iAddr[6];
 };
 typedef TPckgBuf<TBtHidPadState> TBtHidPadStatePckg;
+
+/* Wiimote (Nintendo RVL-CNT-01 y el Wii Remote Plus -TR): ocupa un lugar de joystick como los demas (PadState da
+   sus botones como los de un joystick: A cruz, B R2, 1 cuadrado, 2 circulo, - select, + start, Home PS). Lo propio
+   del Wiimote lo da WiiState: el acelerometro, el giroscopio (MotionPlus) y la camara infrarroja.
+
+   Puntero: con 4 LEDs infrarrojos, uno en cada esquina de la pantalla, la camara los ve y se calcula a que punto de
+   la pantalla apunta (la transformacion de perspectiva de los 4 puntos a las esquinas): no hace falta calibrar y
+   vale desde cualquier lugar y con el control girado (hasta 75 grados). iAimX e iAimY van de 0 a 1: (0, 0) la
+   esquina de arriba a la izquierda, (1, 1) la de abajo a la derecha; fuera de la pantalla dan menos de 0 o mas de 1.
+   Si se pierden 1 o 2 LEDs (apuntando cerca del borde, la camara ve unos 33 x 23 grados) se siguen con el
+   movimiento de los otros: iAim dice cuantos LEDs ve de verdad (4 = exacto). Cada vez que se aprieta B (el gatillo)
+   iShots suma uno y iShotX/iShotY guardan donde apuntaba en ese reporte: un juego que pide el estado de vez en
+   cuando no pierde disparos. */
+enum TBtHidWiiButton
+{
+	EBtHidWiiUp, EBtHidWiiDown, EBtHidWiiLeft, EBtHidWiiRight, EBtHidWiiA, EBtHidWiiB, EBtHidWiiOne, EBtHidWiiTwo,
+	EBtHidWiiMinus, EBtHidWiiPlus, EBtHidWiiHome,
+	EBtHidWiiButtons
+};
+
+struct TBtHidWiiState
+{
+	TInt    iConnected;    // es un Wiimote y esta conectado
+	TUint32 iButtons;      // apretados: bit ( 1 << TBtHidWiiButton )
+	TInt    iAccel[3];     // X Y Z como vienen (10 bits, ~512 sin aceleracion)
+	TReal32 iAccelG[3];    // en g, con la calibracion del control (quieto y boca arriba: Z = 1)
+	TInt    iMotionPlus;   // tiene giroscopio (MotionPlus o Wii Remote Plus) y esta mandando
+	TInt    iGyro[3];      // yaw roll pitch como vienen (14 bits, ~8000 quieto)
+	TReal32 iGyroDps[3];   // en grados por segundo (el cero se toma solo cada vez que se lo deja quieto)
+	TInt    iIrCount;      // cuantos puntos infrarrojos ve la camara (0-4)
+	TInt    iIrX[4];       // donde: X 0-1023, Y 0-767, con Y para arriba (-1 = ese no lo ve)
+	TInt    iIrY[4];
+	TInt    iIrCorner[4];  // que punto (0-3) es cada esquina: arriba izq, arriba der, abajo der, abajo izq (-1 = ?)
+	TInt    iAim;          // LEDs de las esquinas que ve de verdad (2-4); 0 = no se sabe a donde apunta
+	TReal32 iAimX, iAimY;  // a donde apunta: 0-1 de izquierda a derecha y de arriba a abajo
+	TInt    iShots;        // veces que se apreto B desde que se conecto
+	TReal32 iShotX, iShotY; // a donde apuntaba la ultima vez que se apreto B
+	TInt    iShotAim;      // y cuantos LEDs veia ahi (0 = no se sabia a donde apuntaba)
+	TInt    iBattery;      // en % (-1 = no se sabe)
+	TInt    iReports;      // reportes recibidos desde que se conecto
+};
+typedef TPckgBuf<TBtHidWiiState> TBtHidWiiStatePckg;
 
 class RBtHidManager : public RSessionBase
 {
@@ -98,6 +140,11 @@ public:
 	IMPORT_C TInt SetPadKeys( TBool aOn );
 	// desconectar, conectar o quitar el dispositivo con esa direccion (6 bytes): TBtHidDeviceCommand
 	IMPORT_C TInt DeviceCommand( const TDesC8 &aAddr, TInt aCommand );
+	// el joystick aPad (0-3), si es un Wiimote: acelerometro, giroscopio, camara IR y a donde apunta
+	IMPORT_C TInt WiiState( TInt aPad, TBtHidWiiStatePckg &aState );
+	// buscar un Wiimote (apretando 1+2) sin el cuadro del telefono, para el lugar aSlot (1-4); KErrNotFound si en 40 s
+	// no aparecio
+	IMPORT_C void SearchWii( TRequestStatus &aStatus, TInt aSlot );
 };
 
 #endif // BTHIDMANAGER_H

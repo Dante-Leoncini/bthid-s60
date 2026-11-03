@@ -12,4 +12,6 @@ EXPORTS
 	_ZN13RBtHidManager10SetPadKeysEi @ 11 NONAME
 	_ZN13RBtHidManager9SearchPadER14TRequestStatusi @ 12 NONAME
 	_ZN13RBtHidManager13DeviceCommandERK6TDesC8i @ 13 NONAME
+	_ZN13RBtHidManager8WiiStateEiR8TPckgBufI14TBtHidWiiStateE @ 14 NONAME
+	_ZN13RBtHidManager9SearchWiiER14TRequestStatusi @ 15 NONAME
 

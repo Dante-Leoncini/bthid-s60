@@ -35,7 +35,7 @@ public:
 	void Push( const THIDEvent &aEvent );
 	CBtHidHost *Host() { return iHost; }
 	// aSlot: el lugar del joystick que se busca (1-4; 0 = cualquier dispositivo, aMessage.Int0() es su tipo)
-	void Search( const RMessage2 &aMessage, TInt aSlot = 0 );
+	void Search( const RMessage2 &aMessage, TInt aSlot = 0, TBool aWii = EFalse );
 	void CancelSearch( CBtHidSession *aSession );
 	TInt Clients() const;
 	// lo arranco el telefono al prender (la lista de inicio): sin dispositivos guardados no hace falta seguir
@@ -60,11 +60,15 @@ private:
 	// el modo teclado al SISTEMA: la tecla como si fuera del telefono (a la app de adelante y al menu)
 	TBool SendRawKey( TInt aUsage, TBool aDown );
 	TBool ForegroundIsPadUser();
+	TInt ArrowFor( TInt aScan );
 
 	CBtHidHost    *iHost;
 	CPeriodic     *iShutdown;
 	RWsSession     iWs;
 	TBool          iWsOpen;
+	CWsScreenDevice *iScreen;      // (para saber si la pantalla esta girada)
+	TInt           iArrowSent[4];  // la flecha que se mando al apretar cada una (79-82): se suelta esa misma
+	TInt           iRotLogged;
 	TInt           iSessions;
 	TInt           iButtons;
 	RMessagePtr2   iSearchMsg;
@@ -203,6 +207,9 @@ void CBtHidSession::ServiceL( const RMessage2 &aMessage )
 	case EBtHidSearchPad:
 		Server().Search( aMessage, aMessage.Int0() < 1 ? 1 : aMessage.Int0() > EBtHidMaxPads ? EBtHidMaxPads : aMessage.Int0());
 		return;
+	case EBtHidSearchWii:
+		Server().Search( aMessage, aMessage.Int0() < 1 ? 1 : aMessage.Int0() > EBtHidMaxPads ? EBtHidMaxPads : aMessage.Int0(), ETrue );
+		return;
 	case EBtHidDeviceCmd:
 		{
 			TBuf8<6> addr;
@@ -239,6 +246,17 @@ void CBtHidSession::ServiceL( const RMessage2 &aMessage )
 			Mem::FillZ( &st(), sizeof( TBtHidPadState ));
 			if( Server().Host())
 				Server().Host()->GetPadState( aMessage.Int0(), st());
+			aMessage.WriteL( 1, st );
+			aMessage.Complete( KErrNone );
+		}
+		return;
+	case EBtHidWiiState:
+		{
+			Server().AddPadUser( iPid );
+			TBtHidWiiStatePckg st;
+			Mem::FillZ( &st(), sizeof( TBtHidWiiState ));
+			if( Server().Host())
+				Server().Host()->GetWiiState( aMessage.Int0(), st());
 			aMessage.WriteL( 1, st );
 			aMessage.Complete( KErrNone );
 		}
@@ -293,6 +311,16 @@ void CBtHidServer::ConstructL()
 	iWsOpen = iWs.Connect() == KErrNone;
 	if( !iWsOpen )
 		BtHidLog( "sin la ventana del sistema: el modo teclado solo llega a las apps conectadas" );
+	else
+	{
+		iScreen = new CWsScreenDevice( iWs );
+		if( iScreen && iScreen->Construct() != KErrNone )
+		{
+			delete iScreen;
+			iScreen = NULL;
+		}
+	}
+	iRotLogged = -1;
 
 	// los dispositivos elegidos se guardan en la carpeta privada del servidor (c:\private\e0d69650)
 	User::LeaveIfError( fs.Connect());
@@ -309,6 +337,7 @@ CBtHidServer::~CBtHidServer()
 	delete iHost;
 	iHost = NULL;
 	delete iShutdown;
+	delete iScreen;
 	if( iWsOpen )
 		iWs.Close();
 }
@@ -385,7 +414,7 @@ void CBtHidServer::Push( const THIDEvent &aEvent )
 		s->Push( aEvent );
 }
 
-void CBtHidServer::Search( const RMessage2 &aMessage, TInt aSlot )
+void CBtHidServer::Search( const RMessage2 &aMessage, TInt aSlot, TBool aWii )
 {
 	if( !iHost )
 	{
@@ -399,7 +428,9 @@ void CBtHidServer::Search( const RMessage2 &aMessage, TInt aSlot )
 	}
 	iSearchMsg = aMessage;
 	iSearchSession = static_cast<CBtHidSession *>( aMessage.Session());
-	if( aSlot > 0 )
+	if( aWii )
+		iHost->SelectWii( aSlot );
+	else if( aSlot > 0 )
 		iHost->SelectPad( aSlot );
 	else
 		iHost->SelectDevice( aMessage.Int0());
@@ -512,11 +543,42 @@ TBool CBtHidServer::ForegroundIsPadUser()
 	return pad;
 }
 
+/* con la pantalla girada el sistema gira las flechas (las toma como de la cruceta del telefono: en horizontal arriba
+   pasaba a ser izquierda): se manda la que, girada, queda como la que se apreto */
+TInt CBtHidServer::ArrowFor( TInt aScan )
+{
+	static const TInt ccw[4] = { EStdKeyUpArrow, EStdKeyLeftArrow, EStdKeyDownArrow, EStdKeyRightArrow };
+	TPixelsTwipsAndRotation r;
+	TInt q = 0, i;
+
+	if( iScreen )
+	{
+		iScreen->GetScreenModeSizeAndRotation( iScreen->CurrentScreenMode(), r );
+		q = r.iRotation & 3; // normal, 90, 180, 270
+	}
+	if( q != iRotLogged )
+	{
+		TBuf8<40> msg;
+		msg.Format( _L8( "pantalla: rotacion %d" ), q * 90 );
+		BtHidLog( (const char *)msg.PtrZ());
+		iRotLogged = q;
+	}
+	for( i = 0; i < 4 && ccw[i] != aScan; i++ ) {}
+	return i < 4 ? ccw[( i - q + 4 ) & 3] : aScan;
+}
+
 TBool CBtHidServer::SendRawKey( TInt aUsage, TBool aDown )
 {
 	TInt scan = ScanCode( aUsage );
 	if( !iWsOpen || scan < 0 )
 		return EFalse;
+	if( aUsage >= 79 && aUsage <= 82 )
+	{
+		if( aDown )
+			iArrowSent[aUsage - 79] = scan = ArrowFor( scan );
+		else if( iArrowSent[aUsage - 79] )
+			scan = iArrowSent[aUsage - 79];
+	}
 	// (soltar siempre: si la tecla se apreto en otra app que no leia el joystick, que no quede apretada)
 	if( aDown && ForegroundIsPadUser())
 		return ETrue;

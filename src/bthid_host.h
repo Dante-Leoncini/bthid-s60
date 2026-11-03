@@ -36,6 +36,7 @@ public:
 
 class CBtHidDevice;
 class CBtHidListener;
+class CBtHidWiiFinder;
 
 class CBtHidHost : public CActive
 {
@@ -53,7 +54,12 @@ public:
 	// lo mismo para un joystick en el lugar aSlot (1-4): ese es su numero de jugador
 	void SelectPad( TInt aSlot );
 	// mientras esta abierto el cuadro de busqueda no se llama a nadie (la busqueda necesita la radio)
-	TBool Searching() const { return IsActive(); }
+	TBool Searching() const;
+	// buscar un Wiimote sin el cuadro (apretando 1+2) para el lugar aSlot (1-4); lo que ve va al log
+	void SelectWii( TInt aSlot );
+	void WiiFound( const TBTDevAddr &aAddr, const TDesC8 &aName, TInt aSlot );
+	// de a uno: se esta llamando a otro, o hay uno recien elegido que tiene la radio para el
+	TBool RadioBusy( const CBtHidDevice *aDev ) const;
 	// desconectar / conectar / quitar uno (TBtHidDeviceCommand)
 	TInt DeviceCommand( const TBTDevAddr &aAddr, TInt aCommand );
 	void CancelSelect();
@@ -63,6 +69,8 @@ public:
 	// joysticks: el numero aPad (0-3) es el de jugador, por orden de conexion desde que arranco el servidor (el
 	// primero que se conecta es el 1); si uno se corta, al volver recupera el suyo
 	void GetPadState( TInt aPad, TBtHidPadState &aState ) const;
+	// el joystick aPad si es un Wiimote (si no, queda todo en 0)
+	void GetWiiState( TInt aPad, TBtHidWiiState &aState ) const;
 	void SetPadRumble( TInt aPad, TBool aOn );
 	TInt PadIndex( const CBtHidDevice *aDev ) const;
 	void AssignPlayer( CBtHidDevice *aDev );
@@ -99,9 +107,12 @@ private:
 	TBTDeviceResponseParamsPckg   iResp;
 	CBtHidDevice                 *iDev[EMaxDevices];
 	CBtHidListener               *iListenCtrl, *iListenIntr;
+	CBtHidWiiFinder              *iWiiFinder;
 	TFileName                     iFile;
 	TInt                          iSelectType;
 	TInt                          iSelectSlot;   // el lugar del joystick que se busca (0 = no es un joystick)
+	TBTDevAddr                    iFirstAddr;    // el recien elegido: hasta iFirstUntil solo se llama a ese
+	TTime                         iFirstUntil;
 	TBool                         iPadKeys;
 	TUint8                        iPadKeyMap[EBtHidMaxPads][EPadKeyInputs];
 };

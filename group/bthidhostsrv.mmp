@@ -1,9 +1,11 @@
-// servidor: se queda con las conexiones Bluetooth del mouse y el teclado (sin interfaz)
+// servidor: se queda con las conexiones Bluetooth del mouse y el teclado (sin interfaz).
+// WriteDeviceData: el codigo del Wiimote (binario, no se puede escribir en el cuadro) se guarda en el registro
+// Bluetooth del telefono para que el stack lo conteste solo
 TARGET          bthidhostsrv.exe
 TARGETTYPE      exe
 UID             0 0xe0d69650
 VENDORID        0
-CAPABILITY      LocalServices SwEvent
+CAPABILITY      LocalServices SwEvent WriteDeviceData
 
 EPOCSTACKSIZE   0x5000
 EPOCHEAPSIZE    0x1000 0x100000
@@ -28,5 +30,6 @@ LIBRARY         esock.lib
 LIBRARY         bluetooth.lib
 LIBRARY         btextnotifiers.lib
 LIBRARY         btdevice.lib
+LIBRARY         btmanclient.lib
 LIBRARY         sdpagent.lib
 LIBRARY         sdpdatabase.lib

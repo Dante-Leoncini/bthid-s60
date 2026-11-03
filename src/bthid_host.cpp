@@ -21,6 +21,11 @@ despertarse (HIDNormallyConnectable = no), y esa conexion entrante la adopta el 
 #include <bt_sock.h>
 #include <btdevice.h>
 #include <btsdp.h>
+#include <btmanclient.h>
+#include <btnotifierapi.h>
+#include <bt_subscribe.h>
+#include <e32property.h>
+#include <e32math.h>
 #include <f32file.h>
 
 const TUint  KHidCtrlPsm      = 0x11;
@@ -47,6 +52,11 @@ const TInt   KRetrySlowUs     = 60000000; // despues de varios fallos: casi todo
                                           // llama el telefono, se conectan ellos al moverlos; llamar seguido
                                           // ocupa la radio y no los deja entrar
 const TInt   KWaitIntrUs      = 5000000;  // conexion entrante: control llego, esperando el canal de datos
+const TInt   KHciPageTimeout  = -6004;    // (el dispositivo no contesto: apagado o lejos)
+const TInt   KHciAuthFailure  = -6005;
+const TInt   KHciKeyMissing   = -6006;
+const TInt   KL2capSecurity   = -6305;    // (L2CAP: fallo la seguridad; el de PS4 sin autenticacion)
+const TInt   KFirstCallUs     = 60000000; // recien elegido: el primer minuto se llama solo a ese
 
 class CBtHidDevice;
 
@@ -136,6 +146,8 @@ public:
 	const TBTDevAddr &Addr() const { return iAddr; }
 	TInt Type() const { return iType; }
 	const TDesC8 &Name() const { return iName; }
+	// llamandolo ahora (la radio esta ocupada con el)
+	TBool Calling() const { return iState == EConnCtrl || iState == EConnIntr; }
 	TInt State() const { return iConnected ? EBtHidConnected : iStopped ? EBtHidStopped : iState == EWaitDevice
 		? EBtHidWaiting : iState == EWaitRetry ? EBtHidDisconnected : EBtHidConnecting; }
 	TInt Battery() const { return iConnected ? iPadBattery : -1; }
@@ -160,6 +172,9 @@ public:
 	void PadState( TBtHidPadState &aState ) const;
 	void SetRumble( TBool aOn );
 	void Light() { PadOutput(); }   // (la luz de su numero, al cambiarlo de lugar)
+	// Wiimote: por el nombre que da el cuadro de busqueda ("Nintendo RVL-CNT-01", el Plus "...-01-TR")
+	TBool IsWii() const { return iType == EBtHidGamepad && ( iPadKind == EBtHidPadWii || iName.Find( _L8( "RVL-CNT" )) >= 0 ); }
+	void WiiState( TBtHidWiiState &aState ) const;
 
 private:
 	enum TState { EIdle, EConnCtrl, EConnIntr, ESetProto, EReading, EWaitRetry, EWaitIntr, EWaitDevice };
@@ -175,12 +190,23 @@ private:
 	void Report( const TDesC8 &aData );
 	void PadReport( const TDesC8 &aData );
 	void PadOutput();
+	void PadAskFull();
 	TBool LayoutReport( const TDesC8 &aData );
 	void BootReport( const TDesC8 &aData );
 	void KeyboardState( TUint8 aMods, const TUint8 *aKeys );
 	void StartSdp();
 	void LogLayout();
 	void LogDescriptor();
+	void WiiPin();
+	void WiiStart();
+	void WiiSend( const TUint8 *aData, TInt aLen, TInt aWaitUs = 0 );
+	void WiiWrite( TUint32 aAddr, const TUint8 *aData, TInt aLen );
+	void WiiRead( TUint32 aAddr, TInt aLen );
+	void WiiMode();
+	void WiiReport( const TDesC8 &aData );
+	void WiiIr( const TUint8 *aIr );
+	void WiiGyro( const TUint8 *aExt );
+	void WiiAim();
 	void Log( const char *aWhat, TInt aErr );
 
 	CBtHidHost &iHost;
@@ -230,6 +256,28 @@ private:
 	TBool       iPadFullAsked;   // (DualShock 4: ya se le pidio el reporte completo en esta conexion)
 	TBool       iPadFullSeen;    // (y ya llego uno: al log)
 	TInt        iPadBatLogged;   // la ultima bateria anotada en el log (-1 = ninguna)
+	// Wiimote
+	TInt        iWiiAuth;        // como se lo llama: 0 sin codigo, 1 con el de 1+2, 2 con el del boton rojo (WiiPin)
+	TBool       iWiiAuthOk;      // (ese anduvo: no se cambia mas)
+	TBool       iWiiUnpair;      // fallo la autenticacion: borrar la clave vieja antes del proximo intento
+	TBuf8<24>   iWiiOut;
+	TUint32     iWiiButtons;
+	TInt        iWiiAccel[3], iWiiZero[3], iWiiOne[3]; // crudos, y la calibracion (0 g y 1 g) que trae el control
+	TBool       iWiiMplus;       // el MotionPlus manda
+	TInt        iWiiGyro[3];
+	TBool       iWiiGyroFast[3];
+	TInt        iWiiGyroZero[3];
+	TInt        iWiiGyroSum[3], iWiiGyroMin[3], iWiiGyroMax[3], iWiiGyroN; // (para tomar el cero quieto)
+	TInt        iWiiIrX[4], iWiiIrY[4], iWiiIrCount;
+	TInt        iWiiCorner[4];   // que punto es cada esquina: arriba izq, arriba der, abajo der, abajo izq
+	TReal       iWiiCornerX[4], iWiiCornerY[4]; // donde se vio (o se supuso) cada esquina en el ultimo reporte
+	TInt        iWiiAim;
+	TReal       iWiiAimX, iWiiAimY;
+	TInt        iWiiShots;
+	TReal       iWiiShotX, iWiiShotY;
+	TInt        iWiiShotAim;
+	TInt        iWiiLogged;      // para el log: respuestas de escritura con error
+	TBool       iWiiSideways;    // acostado (modo teclado: la cruceta girada)
 public:
 	void PadKeys();              // el modo teclado: las teclas de lo apretado ahora
 	void ReleasePadKeys();
@@ -254,6 +302,593 @@ CBtHidDevice::CBtHidDevice( CBtHidHost &aHost, const TBTDevAddr &aAddr, TInt aTy
 	iTimerOpen = iTimer.CreateLocal() == KErrNone;
 	Mem::FillZ( iKeys, sizeof( iKeys ));
 	iPadBattery = -1;
+}
+
+/* ---------------------------------------------------------------- Wiimote
+   Se conecta apretando 1+2 (o el boton rojo de adentro de la tapa): queda unos 20 s esperando y el telefono lo llama
+   cada pocos segundos. Los originales andan sin codigo; los demas piden emparejar con un codigo binario que no se
+   puede escribir en el cuadro del telefono: la direccion del Wiimote al reves (1+2) o la del telefono al reves (boton
+   rojo; ese ademas lo deja emparejado). WiiPin deja el codigo en el registro Bluetooth del telefono y el stack lo
+   contesta solo. Como no se sabe cual quiere, se prueba sin codigo, con el de 1+2 y con el del boton rojo, y el que
+   anda queda.
+
+   Reportes (todo por el canal de datos; los de salida, A2 + numero, llevan la vibracion en el bit 0 del primer byte):
+     salida 11 LL: luces (0x10 la 1 ... 0x80 la 4). 12 TT MM: modo de reportes (TT 4 = continuo). 13 04 y 1A 04:
+       prender la camara. 15 00: pedir el estado. 16 MM AAAAAA SS + 16 bytes: escribir (MM 4 = registros).
+       17 MM AAAAAA SSSS: leer.
+     entrada 20 BB BB LF 00 00 VV: estado (VV la bateria, 0xC8 llena); hay que volver a pedir el modo de reportes.
+       21 BB BB SE AAAA + 16 bytes: lo leido (SE: los 4 bits bajos el error). 22 BB BB RR EE: respuesta a la escritura.
+       37 BB BB XX YY ZZ + 10 de la camara + 6 de la extension: el que usamos, 100 por segundo.
+     botones BB BB: [0] izquierda derecha abajo arriba + (bits 0-4), [1] 2 1 B A - (bits 0-4) y Home (bit 7). Los bits
+       5 y 6 son los bits bajos del acelerometro.
+   La camara en modo basico (10 bytes, 2 puntos cada 5): X1 Y1 [Y1 X1 Y2 X2 altos, 2 bits cada uno] X2 Y2; un punto
+   que no ve viene en 0xFF. X crece para la derecha de lo que ve y Y para arriba (como wiiuse y cwiid). */
+
+/* la camara ve mas o menos 33 x 23 grados: el punto al que apunta el control es el centro */
+const TReal KWiiCamX = 512.0, KWiiCamY = 384.0;
+
+/* los codigos del Wiimote al registro Bluetooth del telefono: el stack los contesta solo cuando el Wiimote pide
+   autenticacion */
+void CBtHidDevice::WiiPin()
+{
+	RBTRegServ     rs;
+	RBTRegistry    reg;
+	TRequestStatus st;
+	TBTPinCode     pin;
+	TBuf8<16>      phone;
+	TInt           i;
+
+	pin().iLength = 6;
+	if( iWiiAuth == 1 )
+	{
+		for( i = 0; i < 6; i++ )
+			pin().iPIN[i] = iAddr[5 - i];
+	}
+	else
+	{
+		if( RProperty::Get( KPropertyUidBluetoothCategory, KPropertyKeyBluetoothGetLocalDeviceAddress, phone ) != KErrNone
+			|| phone.Length() != 6 )
+		{
+			Log( "wiimote: no se sabe la direccion del telefono", KErrNotFound );
+			return;
+		}
+		for( i = 0; i < 6; i++ )
+			pin().iPIN[i] = phone[5 - i];
+	}
+	if( rs.Connect() != KErrNone )
+		return;
+	if( reg.Open( rs ) == KErrNone )
+	{
+		if( iWiiUnpair )
+		{
+			iWiiUnpair = EFalse;
+			reg.UnpairDevice( iAddr, st );
+			User::WaitForRequest( st );
+			Log( "wiimote: borrada la clave vieja", st.Int());
+		}
+		TBTNamelessDevice dev;
+		dev.SetAddress( iAddr );
+		dev.SetPassKey( pin );
+		reg.ModifyDevice( dev, st );
+		User::WaitForRequest( st );
+		if( st.Int() == KErrNotFound )
+		{
+			CBTDevice *d = NULL;
+			TRAPD( err, d = CBTDevice::NewL( iAddr ));
+			if( err == KErrNone )
+			{
+				d->SetPassKey( pin );
+				TRAP( err, reg.AddDeviceL( *d, st ));
+				if( err == KErrNone )
+					User::WaitForRequest( st );
+				else
+					st = err;
+				delete d;
+			}
+		}
+		Log( iWiiAuth == 1 ? "wiimote: codigo de 1+2 en el registro" : "wiimote: codigo del boton rojo en el registro", st.Int());
+		reg.Close();
+	}
+	rs.Close();
+}
+
+/* un reporte de salida (A2 + aData) por el canal de datos, con la vibracion */
+void CBtHidDevice::WiiSend( const TUint8 *aData, TInt aLen, TInt aWaitUs )
+{
+	TRequestStatus st;
+
+	if( !iIntrOpen )
+		return;
+	iWiiOut.SetLength( 0 );
+	iWiiOut.Append( 0xA2 );
+	iWiiOut.Append( aData, Min( aLen, iWiiOut.MaxLength() - 1 ));
+	if( iWiiOut.Length() > 2 )
+		iWiiOut[2] = (TUint8)(( iWiiOut[2] & ~1 ) | ( iPadRumble ? 1 : 0 ));
+	iIntr.Write( iWiiOut, st );
+	User::WaitForRequest( st );
+	// (la camara se queda en un estado raro si se le escribe muy seguido: 50 ms entre escrituras)
+	if( aWaitUs )
+		User::After( aWaitUs );
+}
+
+/* escribir hasta 16 bytes en los registros (aAddr con el 0x04000000 de "registro" se arma aca) */
+void CBtHidDevice::WiiWrite( TUint32 aAddr, const TUint8 *aData, TInt aLen )
+{
+	TUint8 r[22];
+	Mem::FillZ( r, sizeof( r ));
+	r[0] = 0x16;
+	r[1] = 0x04;
+	r[2] = (TUint8)( aAddr >> 16 );
+	r[3] = (TUint8)( aAddr >> 8 );
+	r[4] = (TUint8)aAddr;
+	r[5] = (TUint8)aLen;
+	Mem::Copy( r + 6, aData, Min( aLen, 16 ));
+	WiiSend( r, sizeof( r ), 50000 );
+}
+
+/* leer de la memoria del control (la calibracion) o de los registros (aAddr > 0xFFFF: la extension) */
+void CBtHidDevice::WiiRead( TUint32 aAddr, TInt aLen )
+{
+	TUint8 r[7];
+	r[0] = 0x17;
+	r[1] = aAddr > 0xFFFF ? 0x04 : 0x00;
+	r[2] = (TUint8)( aAddr >> 16 );
+	r[3] = (TUint8)( aAddr >> 8 );
+	r[4] = (TUint8)aAddr;
+	r[5] = (TUint8)( aLen >> 8 );
+	r[6] = (TUint8)aLen;
+	WiiSend( r, sizeof( r ), 20000 );
+}
+
+/* botones + acelerometro + camara (basico) + extension, continuo */
+void CBtHidDevice::WiiMode()
+{
+	static const TUint8 mode[3] = { 0x12, 0x04, 0x37 };
+	WiiSend( mode, sizeof( mode ));
+}
+
+/* recien conectado: la luz, la calibracion del acelerometro, la camara, el MotionPlus (si tiene, contesta la
+   lectura de su identificacion y se lo activa en WiiReport) y el modo de reportes */
+void CBtHidDevice::WiiStart()
+{
+	static const TUint8 status[2] = { 0x15, 0x00 };
+	static const TUint8 cam1[2] = { 0x13, 0x04 }, cam2[2] = { 0x1A, 0x04 };
+	static const TUint8 on[1] = { 0x08 }, basic[1] = { 0x01 }, mplus[1] = { 0x55 };
+	// sensibilidad: la que sugiere marcan en wiibrew (la ultima del bloque 1 mas alta = menos sensible)
+	static const TUint8 block1[9] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x90, 0x00, 0xC0 };
+	static const TUint8 block2[2] = { 0x40, 0x00 };
+	TInt i;
+
+	iPadKind = EBtHidPadWii;
+	iWiiButtons = 0;
+	iWiiMplus = EFalse;
+	iWiiIrCount = 0;
+	iWiiAim = 0;
+	iWiiShots = 0;
+	iWiiShotAim = 0;
+	iWiiGyroN = 0;
+	iWiiLogged = 0;
+	for( i = 0; i < 4; i++ )
+	{
+		iWiiIrX[i] = iWiiIrY[i] = -1;
+		iWiiCorner[i] = -1;
+	}
+	for( i = 0; i < 3; i++ )
+	{
+		iWiiAccel[i] = 512;
+		iWiiGyro[i] = iWiiGyroZero[i] = 8063; // (quieto da ~0x1F7F)
+		if( iWiiOne[i] <= iWiiZero[i] )
+		{
+			// hasta que llegue la del control (WiiReport, 0x21)
+			iWiiZero[i] = 512;
+			iWiiOne[i] = 616;
+		}
+	}
+	PadOutput(); // la luz de su numero
+	WiiSend( status, sizeof( status ), 20000 );
+	WiiRead( 0x0016, 10 );
+	WiiSend( cam1, sizeof( cam1 ), 50000 );
+	WiiSend( cam2, sizeof( cam2 ), 50000 );
+	WiiWrite( 0xB00030, on, 1 );
+	WiiWrite( 0xB00000, block1, sizeof( block1 ));
+	WiiWrite( 0xB0001A, block2, sizeof( block2 ));
+	WiiWrite( 0xB00033, basic, 1 ); // basico: el unico que entra en el reporte 0x37 junto con la extension
+	WiiWrite( 0xB00030, on, 1 );
+	WiiWrite( 0xA600F0, mplus, 1 );
+	WiiRead( 0xA600FA, 6 );
+	WiiMode();
+	Log( "wiimote: camara y modo de reportes pedidos", KErrNone );
+}
+
+void CBtHidDevice::WiiReport( const TDesC8 &aData )
+{
+	static const TUint8 wiiBits[2][8] = {
+		{ EBtHidWiiLeft, EBtHidWiiRight, EBtHidWiiDown, EBtHidWiiUp, EBtHidWiiPlus, 0xFF, 0xFF, 0xFF },
+		{ EBtHidWiiTwo, EBtHidWiiOne, EBtHidWiiB, EBtHidWiiA, EBtHidWiiMinus, 0xFF, 0xFF, EBtHidWiiHome } };
+	const TUint8 *p = aData.Ptr();
+	TInt    n = aData.Length(), i, k, id = p[1];
+	TUint32 b = 0;
+
+	if( n < 4 || id < 0x20 || id > 0x37 )
+		return;
+	for( k = 0; k < 2; k++ )
+		for( i = 0; i < 8; i++ )
+			if( wiiBits[k][i] != 0xFF && ( p[2 + k] & ( 1 << i )))
+				b |= 1 << wiiBits[k][i];
+
+	if( id == 0x20 && n >= 8 )
+	{
+		/* el estado: la bateria. Despues de este reporte no manda mas nada hasta que se le vuelve a pedir el modo */
+		iPadBattery = p[7] >= 0xC8 ? 100 : p[7] * 100 / 0xC8;
+		iPadCharging = EFalse;
+		WiiMode();
+	}
+	else if( id == 0x21 && n >= 7 + 6 )
+	{
+		TInt err = p[4] & 0x0F, addr = ( p[5] << 8 ) | p[6];
+		const TUint8 *d = p + 7;
+		if( addr == 0x0016 && !err && n >= 7 + 8 )
+		{
+			/* la calibracion: 0 g y 1 g de X Y Z (8 bits altos, y los 2 bajos juntos en el cuarto byte) */
+			for( i = 0; i < 3; i++ )
+			{
+				iWiiZero[i] = ( d[i] << 2 ) | (( d[3] >> ( 4 - 2 * i )) & 3 );
+				iWiiOne[i] = ( d[4 + i] << 2 ) | (( d[7] >> ( 4 - 2 * i )) & 3 );
+			}
+			Log( "wiimote: calibracion del acelerometro", iWiiOne[2] - iWiiZero[2] );
+		}
+		else if( addr == 0x00FA )
+		{
+			/* la identificacion del MotionPlus (00 00 A6 20 00 05): activarlo como la extension */
+			if( !err && d[2] == 0xA6 && d[3] == 0x20 )
+			{
+				static const TUint8 activate[1] = { 0x04 };
+				Log( "wiimote: tiene MotionPlus, activandolo", KErrNone );
+				WiiWrite( 0xA600FE, activate, 1 ); // (despues llega un 0x20, que vuelve a pedir el modo)
+			}
+			else
+				Log( "wiimote: sin MotionPlus", err );
+		}
+	}
+	else if( id == 0x22 && n >= 6 && p[5] && iWiiLogged < 10 )
+	{
+		iWiiLogged++;
+		Log( "wiimote: error en el reporte", p[4] * 1000 + p[5] );
+	}
+	else if( id >= 0x31 && id != 0x32 && id != 0x34 && id != 0x36 && n >= 7 )
+	{
+		/* el acelerometro: 8 bits altos en XX YY ZZ y los bajos en los botones (X 2 bits, Y y Z 1) */
+		iWiiAccel[0] = ( p[4] << 2 ) | (( p[2] >> 5 ) & 3 );
+		iWiiAccel[1] = ( p[5] << 2 ) | (( p[3] >> 4 ) & 2 );
+		iWiiAccel[2] = ( p[6] << 2 ) | (( p[3] >> 5 ) & 2 );
+		if( id == 0x37 && n >= 23 )
+		{
+			WiiIr( p + 7 );
+			WiiGyro( p + 17 );
+		}
+	}
+
+	/* B (el gatillo) recien apretado: un disparo, donde apuntaba en este reporte */
+	if(( b & ( 1 << EBtHidWiiB )) && !( iWiiButtons & ( 1 << EBtHidWiiB )))
+	{
+		iWiiShots++;
+		iWiiShotAim = iWiiAim;
+		iWiiShotX = iWiiAimX;
+		iWiiShotY = iWiiAimY;
+	}
+	if( b != iWiiButtons && iBtnLogged < 40 )
+	{
+		TBuf8<48> msg;
+		msg.Format( _L8( "wiimote: botones %04x" ), b );
+		Log( (const char *)msg.PtrZ(), iWiiAim );
+		iBtnLogged++;
+	}
+	iWiiButtons = b;
+
+	/* como joystick (PadState y el modo teclado): A cruz, B R2, 1 cuadrado, 2 circulo, - select, + start, Home PS */
+	{
+		static const TUint8 padOf[EBtHidWiiButtons] = { EBtHidPadUp, EBtHidPadDown, EBtHidPadLeft, EBtHidPadRight,
+			EBtHidPadCross, EBtHidPadR2, EBtHidPadSquare, EBtHidPadCircle, EBtHidPadSelect, EBtHidPadStart, EBtHidPadPS };
+		TUint32 pb = 0;
+		for( i = 0; i < EBtHidWiiButtons; i++ )
+			if( b & ( 1 << i ))
+				pb |= 1 << padOf[i];
+		iPadButtons = pb;
+		for( i = 0; i < EBtHidPadButtons; i++ )
+			iPadPressure[i] = ( pb & ( 1 << i )) ? 255 : 0;
+	}
+	iPadReports++;
+	if( iPadReports == 200 )
+		iWiiAuthOk = ETrue; // anduvo un rato: esa forma de llamarlo queda
+	/* la bateria cada 30 s (100 reportes por segundo) */
+	if( iPadReports % 3000 == 0 )
+	{
+		static const TUint8 status[2] = { 0x15, 0x00 };
+		WiiSend( status, sizeof( status ));
+	}
+	if( iPadBattery >= 0 && ( iPadBatLogged < 0 || iPadBattery / 10 != iPadBatLogged / 10 ))
+	{
+		iPadBatLogged = iPadBattery;
+		Log( "bateria", iPadBattery );
+	}
+	PadKeys();
+}
+
+/* la camara en modo basico: 4 puntos, 2 cada 5 bytes */
+void CBtHidDevice::WiiIr( const TUint8 *aIr )
+{
+	TInt k, i;
+
+	iWiiIrCount = 0;
+	for( k = 0; k < 2; k++ )
+	{
+		const TUint8 *q = aIr + 5 * k;
+		TInt x[2], y[2];
+		x[0] = q[0] | ((( q[2] >> 4 ) & 3 ) << 8 );
+		y[0] = q[1] | ((( q[2] >> 6 ) & 3 ) << 8 );
+		x[1] = q[3] | (( q[2] & 3 ) << 8 );
+		y[1] = q[4] | ((( q[2] >> 2 ) & 3 ) << 8 );
+		for( i = 0; i < 2; i++ )
+		{
+			TBool seen = y[i] < 768 && x[i] < 1023;
+			iWiiIrX[2 * k + i] = seen ? x[i] : -1;
+			iWiiIrY[2 * k + i] = seen ? y[i] : -1;
+			if( seen )
+				iWiiIrCount++;
+		}
+	}
+	WiiAim();
+}
+
+/* el MotionPlus: yaw roll pitch de 14 bits (8 bajos en 0-2, 6 altos arriba de 3-5); en 3 y 4 los bits de "lento"
+   (0 = gira rapido, otra escala); el bit 1 de 5 dice que son datos del MotionPlus. El cero se toma solo: medio
+   segundo quieto (lento y moviendose menos de 40) */
+void CBtHidDevice::WiiGyro( const TUint8 *aExt )
+{
+	TInt i;
+
+	if( !( aExt[5] & 0x02 ))
+		return;
+	if( !iWiiMplus )
+		Log( "wiimote: llegan los datos del MotionPlus", KErrNone );
+	iWiiMplus = ETrue;
+	iWiiGyro[0] = aExt[0] | (( aExt[3] & 0xFC ) << 6 );
+	iWiiGyro[1] = aExt[1] | (( aExt[4] & 0xFC ) << 6 );
+	iWiiGyro[2] = aExt[2] | (( aExt[5] & 0xFC ) << 6 );
+	iWiiGyroFast[0] = !( aExt[3] & 0x02 );
+	iWiiGyroFast[1] = !( aExt[4] & 0x02 );
+	iWiiGyroFast[2] = !( aExt[3] & 0x01 );
+
+	if( iWiiGyroFast[0] || iWiiGyroFast[1] || iWiiGyroFast[2] )
+	{
+		iWiiGyroN = 0;
+		return;
+	}
+	for( i = 0; i < 3; i++ )
+	{
+		TInt v = iWiiGyro[i];
+		if( !iWiiGyroN )
+		{
+			iWiiGyroSum[i] = 0;
+			iWiiGyroMin[i] = iWiiGyroMax[i] = v;
+		}
+		iWiiGyroSum[i] += v;
+		if( v < iWiiGyroMin[i] ) iWiiGyroMin[i] = v;
+		if( v > iWiiGyroMax[i] ) iWiiGyroMax[i] = v;
+	}
+	iWiiGyroN++;
+	for( i = 0; i < 3; i++ )
+		if( iWiiGyroMax[i] - iWiiGyroMin[i] > 40 )
+		{
+			iWiiGyroN = 0; // se movio: de nuevo
+			return;
+		}
+	if( iWiiGyroN >= 50 )
+	{
+		for( i = 0; i < 3; i++ )
+			iWiiGyroZero[i] = iWiiGyroSum[i] / iWiiGyroN;
+		iWiiGyroN = 0;
+	}
+}
+
+/* a donde apunta. Las 4 esquinas en la camara, por el angulo alrededor del centro: se busca la de arriba a la
+   izquierda y de ahi, en sentido antihorario, abajo izq, abajo der, arriba der. Con las 4 se calcula la transformacion de perspectiva del cuadrado (0,0)-(1,1)
+   a esas 4 (Heckbert) y con la inversa, el centro de la camara en la pantalla. Si se pierden 1 o 2, cada punto que
+   se ve es la esquina que estaba mas cerca en el reporte anterior y las que faltan se mueven lo mismo que esas */
+void CBtHidDevice::WiiAim()
+{
+	TReal px[4], py[4];
+	TInt  seen = 0, i, c;
+
+	if( iWiiIrCount == 4 )
+	{
+		TReal cx = 0, cy = 0, ang[4];
+		TInt  order[4], best = 0;
+		TReal bestd = 100;
+		for( i = 0; i < 4; i++ )
+		{
+			cx += iWiiIrX[i];
+			cy += iWiiIrY[i];
+		}
+		cx /= 4;
+		cy /= 4;
+		for( i = 0; i < 4; i++ )
+		{
+			Math::ATan( ang[i], iWiiIrY[i] - cy, iWiiIrX[i] - cx );
+			order[i] = i;
+		}
+		for( i = 1; i < 4; i++ ) // por angulo
+			for( c = i; c > 0 && ang[order[c]] < ang[order[c - 1]]; c-- )
+			{
+				TInt t = order[c];
+				order[c] = order[c - 1];
+				order[c - 1] = t;
+			}
+		/* los lados largos son los horizontales: de las dos esquinas de donde sale un lado corto (en sentido
+		   antihorario, arriba izq -> abajo izq), la de arriba a la izquierda es la mas alta mirando perpendicular a
+		   los largos (vale girado hasta 75 grados). Si los lados se parecen mucho, la mas cerca de los 135 grados */
+		TReal len[4];
+		for( i = 0; i < 4; i++ )
+		{
+			TReal ex = iWiiIrX[order[( i + 1 ) % 4]] - iWiiIrX[order[i]], ey = iWiiIrY[order[( i + 1 ) % 4]] - iWiiIrY[order[i]];
+			Math::Sqrt( len[i], ex * ex + ey * ey );
+		}
+		TReal pa = len[0] + len[2], pb = len[1] + len[3];
+		if( pa - pb > 0.1 * pa || pb - pa > 0.1 * pb )
+		{
+			TInt  c0 = pa < pb ? 0 : 1;
+			TReal hx = iWiiIrX[order[( c0 + 2 ) % 4]] - iWiiIrX[order[( c0 + 1 ) % 4]];
+			TReal hy = iWiiIrY[order[( c0 + 2 ) % 4]] - iWiiIrY[order[( c0 + 1 ) % 4]];
+			if( hx < 0 )
+			{
+				hx = -hx;
+				hy = -hy;
+			}
+			// (-hy, hx): para arriba
+			TReal s0 = ( iWiiIrX[order[c0]] - cx ) * -hy + ( iWiiIrY[order[c0]] - cy ) * hx;
+			TReal s2 = ( iWiiIrX[order[c0 + 2]] - cx ) * -hy + ( iWiiIrY[order[c0 + 2]] - cy ) * hx;
+			best = s0 >= s2 ? c0 : c0 + 2;
+		}
+		else
+			for( i = 0; i < 4; i++ )
+			{
+				TReal d = ang[order[i]] - 3 * KPi / 4;
+				if( d > KPi ) d -= 2 * KPi;
+				if( d < -KPi ) d += 2 * KPi;
+				if( d < 0 ) d = -d;
+				if( d < bestd )
+				{
+					bestd = d;
+					best = i;
+				}
+			}
+		{
+			static const TInt cornerOfStep[4] = { 0, 3, 2, 1 }; // arriba izq, abajo izq, abajo der, arriba der
+			for( i = 0; i < 4; i++ )
+				iWiiCorner[cornerOfStep[i]] = order[( best + i ) % 4];
+		}
+		for( c = 0; c < 4; c++ )
+		{
+			px[c] = iWiiIrX[iWiiCorner[c]];
+			py[c] = iWiiIrY[iWiiCorner[c]];
+		}
+		seen = 4;
+	}
+	else if( iWiiAim && iWiiIrCount >= 2 )
+	{
+		TBool have[4] = { EFalse, EFalse, EFalse, EFalse };
+		TReal mx = 0, my = 0;
+		for( c = 0; c < 4; c++ )
+			iWiiCorner[c] = -1;
+		for( i = 0; i < 4; i++ )
+		{
+			TInt  nearest = -1;
+			TReal neard = 200.0 * 200.0; // (mas lejos que eso en un reporte, no es esa)
+			if( iWiiIrX[i] < 0 )
+				continue;
+			for( c = 0; c < 4; c++ )
+			{
+				TReal dx = iWiiIrX[i] - iWiiCornerX[c], dy = iWiiIrY[i] - iWiiCornerY[c];
+				if( !have[c] && dx * dx + dy * dy < neard )
+				{
+					neard = dx * dx + dy * dy;
+					nearest = c;
+				}
+			}
+			if( nearest < 0 )
+				continue;
+			have[nearest] = ETrue;
+			iWiiCorner[nearest] = i;
+			px[nearest] = iWiiIrX[i];
+			py[nearest] = iWiiIrY[i];
+			mx += px[nearest] - iWiiCornerX[nearest];
+			my += py[nearest] - iWiiCornerY[nearest];
+			seen++;
+		}
+		if( seen < 2 )
+		{
+			iWiiAim = 0;
+			return;
+		}
+		mx /= seen;
+		my /= seen;
+		for( c = 0; c < 4; c++ )
+			if( !have[c] )
+			{
+				px[c] = iWiiCornerX[c] + mx;
+				py[c] = iWiiCornerY[c] + my;
+			}
+	}
+	else
+	{
+		iWiiAim = 0;
+		for( c = 0; c < 4; c++ )
+			iWiiCorner[c] = -1;
+		return;
+	}
+
+	/* del cuadrado a las esquinas: (u, v) -> ( a u + b v + c, d u + e v + f ) / ( g u + h v + 1 ) */
+	TReal dx1 = px[1] - px[2], dx2 = px[3] - px[2], dx3 = px[0] - px[1] + px[2] - px[3];
+	TReal dy1 = py[1] - py[2], dy2 = py[3] - py[2], dy3 = py[0] - py[1] + py[2] - py[3];
+	TReal den = dx1 * dy2 - dx2 * dy1;
+	if( den > -1e-6 && den < 1e-6 )
+	{
+		iWiiAim = 0;
+		return;
+	}
+	TReal g = ( dx3 * dy2 - dx2 * dy3 ) / den, h = ( dx1 * dy3 - dx3 * dy1 ) / den;
+	TReal a = px[1] - px[0] + g * px[1], b = px[3] - px[0] + h * px[3], cc = px[0];
+	TReal d = py[1] - py[0] + g * py[1], e = py[3] - py[0] + h * py[3], f = py[0];
+	/* la inversa (la adjunta: la escala se cancela) aplicada al centro de la camara */
+	TReal w = ( d * h - e * g ) * KWiiCamX + ( b * g - a * h ) * KWiiCamY + ( a * e - b * d );
+	if( w > -1e-9 && w < 1e-9 )
+	{
+		iWiiAim = 0;
+		return;
+	}
+	iWiiAimX = (( e - f * h ) * KWiiCamX + ( cc * h - b ) * KWiiCamY + ( b * f - cc * e )) / w;
+	iWiiAimY = (( f * g - d ) * KWiiCamX + ( a - cc * g ) * KWiiCamY + ( cc * d - a * f )) / w;
+	for( c = 0; c < 4; c++ )
+	{
+		iWiiCornerX[c] = px[c];
+		iWiiCornerY[c] = py[c];
+	}
+	iWiiAim = seen;
+}
+
+void CBtHidDevice::WiiState( TBtHidWiiState &aState ) const
+{
+	TInt i;
+
+	aState.iConnected = iConnected && iPadKind == EBtHidPadWii;
+	aState.iButtons = iWiiButtons;
+	for( i = 0; i < 3; i++ )
+	{
+		TInt one = iWiiOne[i] - iWiiZero[i];
+		aState.iAccel[i] = iWiiAccel[i];
+		aState.iAccelG[i] = one > 0 ? (TReal32)( iWiiAccel[i] - iWiiZero[i] ) / one : 0;
+		aState.iGyro[i] = iWiiGyro[i];
+		/* 8192/595 unidades por grado/s lento; rapido, 2000/440 veces mas */
+		TReal dps = ( iWiiGyro[i] - iWiiGyroZero[i] ) / ( 8192.0 / 595.0 );
+		aState.iGyroDps[i] = (TReal32)( iWiiGyroFast[i] ? dps * 2000.0 / 440.0 : dps );
+	}
+	aState.iMotionPlus = iWiiMplus;
+	aState.iIrCount = iWiiIrCount;
+	for( i = 0; i < 4; i++ )
+	{
+		aState.iIrX[i] = iWiiIrX[i];
+		aState.iIrY[i] = iWiiIrY[i];
+		aState.iIrCorner[i] = iWiiAim ? iWiiCorner[i] : -1;
+	}
+	aState.iAim = iWiiAim;
+	aState.iAimX = (TReal32)iWiiAimX;
+	aState.iAimY = (TReal32)iWiiAimY;
+	aState.iShots = iWiiShots;
+	aState.iShotX = (TReal32)iWiiShotX;
+	aState.iShotY = (TReal32)iWiiShotY;
+	aState.iShotAim = iWiiShotAim;
+	aState.iBattery = iConnected ? iPadBattery : -1;
+	aState.iReports = iPadReports;
 }
 
 CBtHidDevice::~CBtHidDevice()
@@ -312,13 +947,16 @@ void CBtHidDevice::Start()
 
 	if( iStopped )
 		return;
-	if( iHost.Searching() && iTimerOpen )
+	/* el cuadro de busqueda esta abierto (llamar ocuparia la radio y no aparecerian los dispositivos), o se esta
+	   llamando a otro: de a uno. Dos llamadas juntas fallan las dos (-6012) y un joystick recien elegido, esperando
+	   en modo emparejar, no conectaba nunca mientras se llamaba a los otros (apagados) */
+	TBool searching = iHost.Searching();
+	if(( searching || iHost.RadioBusy( this )) && iTimerOpen )
 	{
-		// (el cuadro de busqueda esta abierto: llamar ocuparia la radio y no aparecerian los dispositivos)
 		Cancel();
 		CloseSockets();
 		iState = EWaitRetry;
-		iTimer.After( iStatus, 3000000 );
+		iTimer.After( iStatus, searching ? 3000000 : 1000000 );
 		SetActive();
 		return;
 	}
@@ -342,6 +980,8 @@ void CBtHidDevice::Start()
 	iState = EConnCtrl;
 	if( iFails < 20 )
 		Log( "llamando al dispositivo", iFails );
+	if( IsWii() && iWiiAuth )
+		WiiPin();
 	ConnectChannel( iCtrl, KHidCtrlPsm );
 }
 
@@ -409,9 +1049,10 @@ void CBtHidDevice::ConnectChannel( RSocket &aSock, TUint aPsm )
 	/* el joystick de PS4 tambien: recien elegido (en modo emparejar) no la pide, pero al reconectarse si (sin ella
 	   abre los canales, no manda nada y corta con -6305, falla de autenticacion). Emparejado una vez, se reconecta
 	   con la clave guardada. (El de PS3 no: se empareja por USB con ds3pair) */
-	const TBool auth = iType == EBtHidKeyboard || ( iType == EBtHidGamepad && !CallsBack());
+	/* el Wiimote: segun el intento, sin codigo o con el que dejo WiiPin en el registro (sin cifrado) */
+	const TBool auth = IsWii() ? iWiiAuth != 0 : iType == EBtHidKeyboard || ( iType == EBtHidGamepad && !CallsBack());
 	sec.SetAuthentication( auth );
-	sec.SetEncryption( auth );
+	sec.SetEncryption( auth && !IsWii());
 	sec.SetAuthorisation( EFalse );
 	addr.SetBTAddr( iAddr );
 	addr.SetPort( aPsm );
@@ -441,6 +1082,18 @@ void CBtHidDevice::Retry( TInt aErr )
 		Log( iState == EConnCtrl ? "fallo el canal de control" : iState == EConnIntr ? "fallo el canal de datos"
 			: iState == EWaitIntr ? "llego el control pero no los datos" : "fallo la conexion", aErr );
 	iFails++;
+	/* el Wiimote contesto pero no anduvo (o se corto enseguida: el Plus sin codigo abre los canales y se apaga): el
+	   proximo intento, de otra forma (sin codigo, el de 1+2, el del boton rojo). Si no contesto (apagado, o no se
+	   apreto 1+2) no se sabe nada: se sigue igual */
+	TBool wiiNext = IsWii() && !iWiiAuthOk && aErr != KHciPageTimeout && aErr != KErrCouldNotConnect;
+	if( wiiNext )
+	{
+		if(( aErr == KHciAuthFailure || aErr == KHciKeyMissing || aErr == KL2capSecurity ) && iWiiAuth )
+			iWiiUnpair = ETrue;
+		iWiiAuth = ( iWiiAuth + 1 ) % 3;
+		Log( iWiiAuth == 0 ? "wiimote: el proximo, sin codigo" : iWiiAuth == 1 ? "wiimote: el proximo, con el codigo de 1+2"
+			: "wiimote: el proximo, con el codigo del boton rojo", aErr );
+	}
 	/* desconectado a mano: no se lo llama, pero si llama el se lo atiende */
 	if( iStopped )
 	{
@@ -462,7 +1115,10 @@ void CBtHidDevice::Retry( TInt aErr )
 	// recien cortado el dispositivo esta despierto: volver a llamarlo ya
 	/* un joystick de PS4 al apretar PS espera un rato que lo llame el telefono: se lo llama cada 4 s, siempre
 	   (cada intento ocupa la radio ~5 s: un intervalo largo dejaba pasar ese rato y no reconectaba) */
-	if( iType == EBtHidGamepad )
+	/* (el Wiimote con 1+2 espera solo unos 20 s: la otra forma de llamarlo, enseguida) */
+	if( wiiNext )
+		iTimer.After( iStatus, 1000000 );
+	else if( iType == EBtHidGamepad )
 		iTimer.After( iStatus, dropped ? 500000 : KRetryPadUs );
 	else
 		iTimer.After( iStatus, dropped ? 500000 : iFails < 3 ? KRetryFirstUs : iFails < 6 ? KRetryUs : KRetrySlowUs );
@@ -504,8 +1160,22 @@ void CBtHidDevice::RunL()
 		iPadBatLogged = -1;
 		if( iType == EBtHidGamepad )
 		{
+			// sin reportes todavia: los sticks al centro y nada apretado (no "clavado" arriba a la izquierda)
+			Mem::Fill( iPadAxis, sizeof( iPadAxis ), 0x80 );
+			iPadButtons = 0;
+			Mem::FillZ( iPadPressure, sizeof( iPadPressure ));
 			iHost.AssignPlayer( this );
-			PadOutput(); // la luz de su numero
+			if( IsWii())
+				WiiStart(); // (la luz, la camara, el MotionPlus y el modo de reportes)
+			else if( !CallsBack())
+			{
+				// los de PS4: el original no manda nada hasta que se le habla. El pedido del reporte completo y la
+				// luz en su formato lo despiertan (a los compatibles no les molesta)
+				iPadKind = EBtHidPadPs4;
+				PadAskFull();
+			}
+			if( !IsWii())
+				PadOutput(); // la luz de su numero
 		}
 		LogDescriptor();
 		iState = EReading;
@@ -526,6 +1196,16 @@ void CBtHidDevice::RunL()
 
 void CBtHidDevice::SetProtocol()
 {
+	if( IsWii())
+	{
+		/* el Wiimote no usa el canal de control: directo a conectado (WiiStart le habla por el de datos) */
+		TRequestStatus *st = &iStatus;
+		iProtoBoot = EFalse;
+		iState = ESetProto;
+		SetActive();
+		User::RequestComplete( st, KErrNone );
+		return;
+	}
 	if( iType == EBtHidGamepad )
 	{
 		/* joystick: sin SET_PROTOCOL (el boot es de mouse y teclado). El DualShock 3 no manda nada hasta que
@@ -721,6 +1401,11 @@ void CBtHidDevice::Report( const TDesC8 &aData )
 	}
 	if( aData.Length() < 2 || aData[0] != KHidpDataInput )
 		return;
+	if( IsWii())
+	{
+		WiiReport( aData );
+		return;
+	}
 	if( iType == EBtHidGamepad )
 	{
 		PadReport( aData );
@@ -877,6 +1562,54 @@ static void PadDpad( TUint32 &aButtons, TInt aHat )
 	if( dirs[aHat] & 8 ) aButtons |= 1 << EBtHidPadLeft;
 }
 
+/* DualShock 4: pedirle el feature 0x02 (la calibracion) lo pasa del reporte corto (sin bateria) al completo. El
+   original ademas no manda nada hasta que se le habla: por eso se pide tambien al conectar. Una vez por conexion */
+void CBtHidDevice::PadAskFull()
+{
+	static const TUint8 get[2] = { 0x43, 0x02 }; // GET_REPORT feature 0x02
+	TRequestStatus st;
+
+	if( iPadFullAsked || !iConnected || !iCtrlOpen )
+		return;
+	iPadFullAsked = ETrue;
+	iPadCmd.Copy( get, sizeof( get ));
+	iCtrl.Write( iPadCmd, st );
+	User::WaitForRequest( st );
+	Log( "pidiendo el reporte completo (bateria)", st.Int());
+	/* la respuesta (por el canal de control): al log, para saber si este joystick lo tiene (algunos compatibles no).
+	   Se espera hasta 300 ms */
+	if( iTimerOpen )
+	{
+		TBuf8<64>      resp;
+		TSockXfrLength len;
+		TRequestStatus rst, tst;
+		RTimer         t;
+		if( t.CreateLocal() == KErrNone )
+		{
+			iCtrl.RecvOneOrMore( resp, 0, rst, len );
+			t.After( tst, 300000 );
+			User::WaitForRequest( rst, tst );
+			if( rst == KRequestPending )
+			{
+				iCtrl.CancelRecv();
+				User::WaitForRequest( rst );
+				Log( "sin respuesta al pedido del reporte completo", KErrTimedOut );
+			}
+			else
+			{
+				t.Cancel();
+				User::WaitForRequest( tst );
+				TBuf8<120> msg;
+				msg.Format( _L8( "respuesta %d bytes:" ), resp.Length());
+				for( TInt k = 0; k < resp.Length() && k < 16; k++ )
+					msg.AppendFormat( _L8( " %02x" ), resp[k] );
+				iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+			}
+			t.Close();
+		}
+	}
+}
+
 void CBtHidDevice::PadReport( const TDesC8 &aData )
 {
 	TUint32 b = 0;
@@ -884,6 +1617,19 @@ void CBtHidDevice::PadReport( const TDesC8 &aData )
 	const TUint8 *p = aData.Ptr();
 	TInt    n = aData.Length();
 
+	/* un Wiimote sin nombre (el cuadro no lo dio): sus reportes son del 0x20 al 0x37, que los DualShock no usan */
+	if( n <= 23 && p[1] >= 0x20 && p[1] <= 0x37 && iPadKind != EBtHidPadPs3 )
+	{
+		Log( "es un wiimote", p[1] );
+		if( !iName.Length())
+		{
+			iName.Copy( _L8( "Nintendo RVL-CNT-01" ));
+			iHost.Save();
+		}
+		WiiStart();
+		WiiReport( aData );
+		return;
+	}
 	if( n >= 27 && p[1] == 0x01 && n > 11 )
 	{
 		/* DualShock 3 */
@@ -918,49 +1664,8 @@ void CBtHidDevice::PadReport( const TDesC8 &aData )
 	{
 		/* DualShock 4: el corto (A1 01, 9 bytes) o el completo (A1 11 C0 00 ...) */
 		const TUint8 *q;
-		if( p[1] == 0x01 && n >= 11 && !iPadFullAsked && iConnected && iCtrlOpen )
-		{
-			/* el corto no trae la bateria: pedirle el feature 0x02 (la calibracion) lo pasa al completo */
-			static const TUint8 get[2] = { 0x43, 0x02 }; // GET_REPORT feature 0x02
-			TRequestStatus st;
-			iPadFullAsked = ETrue;
-			iPadCmd.Copy( get, sizeof( get ));
-			iCtrl.Write( iPadCmd, st );
-			User::WaitForRequest( st );
-			Log( "pidiendo el reporte completo (bateria)", st.Int());
-			/* la respuesta (por el canal de control): al log, para saber si este joystick lo tiene (algunos
-			   compatibles no). Se espera hasta 300 ms */
-			if( iTimerOpen )
-			{
-				TBuf8<64>      resp;
-				TSockXfrLength len;
-				TRequestStatus rst, tst;
-				RTimer         t;
-				if( t.CreateLocal() == KErrNone )
-				{
-					iCtrl.RecvOneOrMore( resp, 0, rst, len );
-					t.After( tst, 300000 );
-					User::WaitForRequest( rst, tst );
-					if( rst == KRequestPending )
-					{
-						iCtrl.CancelRecv();
-						User::WaitForRequest( rst );
-						Log( "sin respuesta al pedido del reporte completo", KErrTimedOut );
-					}
-					else
-					{
-						t.Cancel();
-						User::WaitForRequest( tst );
-						TBuf8<120> msg;
-						msg.Format( _L8( "respuesta %d bytes:" ), resp.Length());
-						for( TInt k = 0; k < resp.Length() && k < 16; k++ )
-							msg.AppendFormat( _L8( " %02x" ), resp[k] );
-						iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
-					}
-					t.Close();
-				}
-			}
-		}
+		if( p[1] == 0x01 && n >= 11 )
+			PadAskFull();
 		if( p[1] == 0x11 && !iPadFullSeen )
 		{
 			TBuf8<120> msg;
@@ -1048,6 +1753,26 @@ void CBtHidDevice::PadKeys()
 		if( x < 64 ) s |= 8; else if( x > 96 ) s &= ~8;
 		iPadStick = s;
 	}
+	if( IsWii())
+	{
+		/* el Wiimote, sus teclas: Home menu, - y + las de abajo de la pantalla, A ok, B 1 2 los numeros 1 2 3. Acostado
+		   (de costado, inclinado hacia uno: el acelerometro lo ve en X), la cruceta girada: derecha es arriba */
+		static const TUint8 keys[EBtHidWiiButtons] = { 82, 81, 80, 79, EBtHidPhoneOk, 30, 31, 32,
+			EBtHidPhoneSoftLeft, EBtHidPhoneSoftRight, EBtHidPhoneMenu };
+		static const TUint8 sideways[4] = { 80, 79, 81, 82 }; // arriba abajo izquierda derecha -> izq der abajo arriba
+		TInt one = iWiiOne[0] - iWiiZero[0], gx = one > 0 ? ( iWiiAccel[0] - iWiiZero[0] ) * 100 / one : 0;
+		if( gx < 0 ) gx = -gx;
+		if( gx > 50 ) iWiiSideways = ETrue;
+		else if( gx < 25 ) iWiiSideways = EFalse;
+		for( i = 0; i < EBtHidWiiButtons; i++ )
+		{
+			TInt k = ( iWiiButtons & ( 1u << i )) ? ( i < 4 && iWiiSideways ? sideways[i] : keys[i] ) : 0;
+			if( !k ) continue;
+			for( j = 0; j < n && want[j] != k; j++ ) {}
+			if( j == n ) want[n++] = (TUint8)k;
+		}
+	}
+	else
 	for( i = 0; i < CBtHidHost::EPadKeyInputs; i++ )
 	{
 		TBool on = i < EBtHidPadButtons ? ( iPadButtons & ( 1u << i )) != 0 : ( iPadStick & ( 1 << ( i - EBtHidPadButtons ))) != 0;
@@ -1108,6 +1833,13 @@ void CBtHidDevice::PadOutput()
 	if( pad < 0 ) pad = 0;
 	if( pad > 3 ) pad = 3;
 
+	if( IsWii())
+	{
+		/* Wiimote: la luz de su numero (la vibracion va en el bit 0 de todos los reportes, WiiSend) */
+		TUint8 r[2] = { 0x11, (TUint8)( 0x10 << pad ) };
+		WiiSend( r, sizeof( r ));
+		return;
+	}
 	if( iPadKind == EBtHidPadPs4 )
 	{
 		TUint8  r[79];
@@ -1390,11 +2122,272 @@ void CBtHidHost::GetPadState( TInt aPad, TBtHidPadState &aState ) const
 		d->PadState( aState );
 }
 
+void CBtHidHost::GetWiiState( TInt aPad, TBtHidWiiState &aState ) const
+{
+	CBtHidDevice *d = FindPad( iDev, EMaxDevices, aPad );
+	if( d && d->IsWii())
+		d->WiiState( aState );
+}
+
 void CBtHidHost::SetPadRumble( TInt aPad, TBool aOn )
 {
 	CBtHidDevice *d = FindPad( iDev, EMaxDevices, aPad );
 	if( d )
 		d->SetRumble( aOn );
+}
+
+/* buscar un Wiimote (sin el cuadro del telefono): hasta 40 s de busquedas, alternando la general (GIAC) y la limitada
+   (LIAC). Sin pedir los nombres en la busqueda: con nombres se quedaba esperando para siempre (algun dispositivo que
+   no contesta el nombre). Todo lo que se ve va al log; el Wiimote se reconoce por la clase (periferico, joystick: el
+   de PS4 es gamepad) y despues se le pide el nombre para confirmarlo. Cada pedido tiene su tiempo: si no contesta,
+   se cancela y se sigue */
+class CBtHidWiiFinder : public CActive
+{
+public:
+	CBtHidWiiFinder( CBtHidHost &aHost ) : CActive( EPriorityStandard ), iHost( aHost )
+	{
+		CActiveScheduler::Add( this );
+		iWatch = CPeriodic::New( EPriorityStandard );
+	}
+	~CBtHidWiiFinder()
+	{
+		Cancel();
+		delete iWatch;
+		if( iOpen ) iRes.Close();
+		if( iSsOpen ) iSs.Close();
+		if( iNotifierOpen ) iNotifier.Close();
+	}
+	void Start( TInt aSlot )
+	{
+		iSlot = aSlot;
+		iRound = 0;
+		iUntil.UniversalTime();
+		iUntil += TTimeIntervalMicroSeconds32( 40000000 );
+		/* primero el Bluetooth prendido: el aviso del telefono "Activar Bluetooth?" (si ya esta prendido vuelve enseguida).
+		   Con el apagado no se puede ni abrir la busqueda (-44) */
+		if( !iNotifierOpen )
+			iNotifierOpen = iNotifier.Connect() == KErrNone;
+		if( iNotifierOpen )
+		{
+			iPhase = EPower;
+			iNotifier.StartNotifierAndGetResponse( iStatus, KPowerModeSettingNotifierUid, iPowerParam, iPowerResult );
+			SetActive();
+			return;
+		}
+		Open();
+	}
+
+private:
+	enum { EPower, EInquiry, EName };
+
+	void Open()
+	{
+		/* con su propia sesion del servidor de sockets: la del host esta llena de pedidos pendientes */
+		TInt err = KErrNone;
+		if( !iSsOpen )
+		{
+			err = iSs.Connect();
+			iSsOpen = err == KErrNone;
+		}
+		/* (recien prendido, el Bluetooth tarda un poco: hasta 3 s) */
+		for( TInt i = 0; i < 6 && iSsOpen && !iOpen; i++ )
+		{
+			err = iRes.Open( iSs, KBTAddrFamily, KBTLinkManager );
+			iOpen = err == KErrNone;
+			if( !iOpen && err == KErrHardwareNotAvailable )
+				User::After( 500000 );
+			else
+				break;
+		}
+		if( !iOpen )
+		{
+			TBuf8<48> msg;
+			msg.Format( _L8( "wiimote: no se pudo abrir la busqueda (%d)" ), err );
+			iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+			iHost.Observer().BtHidSearchDone( err != KErrNone ? err : KErrNotReady );
+			return;
+		}
+		iHost.Observer().BtHidLog( "buscando un wiimote (apretar 1+2)" );
+		Round();
+	}
+
+	/* si el pedido no termina en aUs, se cancela (RunL recibe KErrCancel) */
+	void Watch( TInt aUs )
+	{
+		if( !iWatch )
+			return;
+		iWatch->Cancel();
+		iWatch->Start( aUs, aUs, TCallBack( Expired, this ));
+	}
+	static TInt Expired( TAny *aPtr )
+	{
+		CBtHidWiiFinder *self = static_cast<CBtHidWiiFinder *>( aPtr );
+		self->iWatch->Cancel();
+		self->iTimedOut = ETrue;
+		self->iRes.Cancel();
+		return 0;
+	}
+	void Round()
+	{
+		TBuf8<48> msg;
+		iPhase = EInquiry;
+		iTimedOut = EFalse;
+		iAddr = TInquirySockAddr();
+		iAddr.SetIAC( iRound & 1 ? KLIAC : KGIAC );
+		iAddr.SetAction( KHostResInquiry | KHostResIgnoreCache );
+		msg.Format( _L8( "wiimote: busqueda %d (%s)" ), iRound + 1, iRound & 1 ? "limitada" : "general" );
+		iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+		iRes.GetByAddress( iAddr, iEntry, iStatus );
+		SetActive();
+		Watch( 15000000 );
+	}
+	void AskName( const TBTDevAddr &aAddr )
+	{
+		iPhase = EName;
+		iTimedOut = EFalse;
+		iCandidate = aAddr;
+		iAddr = TInquirySockAddr();
+		iAddr.SetBTAddr( aAddr );
+		iAddr.SetAction( KHostResName | KHostResIgnoreCache );
+		iRes.GetByAddress( iAddr, iEntry, iStatus );
+		SetActive();
+		Watch( 6000000 );
+	}
+	void Log( const char *aWhat, const TBTDevAddr &aAddr, TInt aMajor, TInt aMinor, const TDesC8 &aName, TInt aErr )
+	{
+		TBuf<16>   readable;
+		TBuf8<16>  addr;
+		TBuf8<120> msg;
+		aAddr.GetReadable( readable );
+		addr.Copy( readable );
+		msg.Format( _L8( "%s %S clase %02x/%02x nombre \"%S\" (%d)" ), aWhat, &addr, aMajor, aMinor, &aName, aErr );
+		iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+	}
+	void RunL()
+	{
+		TInt err = iStatus.Int();
+		if( iWatch )
+			iWatch->Cancel();
+		if( iPhase == EPower )
+		{
+			iNotifier.CancelNotifier( KPowerModeSettingNotifierUid );
+			if( err != KErrNone || !iPowerResult())
+			{
+				iHost.Observer().BtHidLog( "wiimote: el bluetooth sigue apagado" );
+				iHost.Observer().BtHidSearchDone( KErrCancel );
+				return;
+			}
+			Open();
+			return;
+		}
+		if( iPhase == EName )
+		{
+			/* el nombre del candidato: si es un Wiimote (o no contesto el nombre, con la clase alcanza), listo */
+			TBuf8<32> name;
+			if( err == KErrNone )
+				name.Copy( iEntry().iName.Left( name.MaxLength()));
+			Log( "nombre de", iCandidate, iMajor, iMinor, name, iTimedOut ? KErrTimedOut : err );
+			if( err != KErrNone || name.Find( _L8( "RVL-CNT" )) >= 0 || name.FindF( _L8( "Nintendo" )) >= 0 )
+			{
+				if( name.Find( _L8( "RVL-CNT" )) < 0 )
+					name.Copy( _L8( "Nintendo RVL-CNT-01" ));
+				iHost.WiiFound( iCandidate, name, iSlot );
+				return;
+			}
+			NextRound(); // otro joystick: se sigue buscando
+			return;
+		}
+		if( err == KErrNone )
+		{
+			TInquirySockAddr &a = TInquirySockAddr::Cast( iEntry().iAddr );
+			Log( "visto", a.BTAddr(), a.MajorClassOfDevice(), a.MinorClassOfDevice(), KNullDesC8, KErrNone );
+			if( a.MajorClassOfDevice() == 0x05 && ( a.MinorClassOfDevice() & 0x0F ) == 0x01 )
+			{
+				iMajor = a.MajorClassOfDevice();
+				iMinor = a.MinorClassOfDevice();
+				AskName( a.BTAddr());
+				return;
+			}
+			iRes.Next( iEntry, iStatus );
+			SetActive();
+			Watch( 15000000 );
+			return;
+		}
+		/* termino una busqueda (o fallo, o no contesto): otra, de la otra clase, hasta los 40 s */
+		if( iTimedOut )
+			iHost.Observer().BtHidLog( "wiimote: la busqueda no termino, cancelada" );
+		else if( err != KErrHostResNoMoreResults )
+		{
+			TBuf8<48> msg;
+			msg.Format( _L8( "wiimote: la busqueda fallo (%d)" ), err );
+			iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
+		}
+		NextRound();
+	}
+	void NextRound()
+	{
+		TTime now;
+		now.UniversalTime();
+		if( now > iUntil )
+		{
+			iHost.Observer().BtHidLog( "wiimote: no aparecio" );
+			iHost.Observer().BtHidSearchDone( KErrNotFound );
+			return;
+		}
+		iRound++;
+		Round();
+	}
+	void DoCancel()
+	{
+		if( iWatch )
+			iWatch->Cancel();
+		if( iPhase == EPower )
+			iNotifier.CancelNotifier( KPowerModeSettingNotifierUid );
+		else
+			iRes.Cancel();
+	}
+
+	CBtHidHost       &iHost;
+	RSocketServ       iSs;
+	TBool             iSsOpen;
+	RNotifier         iNotifier;
+	TBool             iNotifierOpen;
+	TPckgBuf<TBool>   iPowerParam, iPowerResult;
+	RHostResolver     iRes;
+	TBool             iOpen;
+	CPeriodic        *iWatch;
+	TBool             iTimedOut;
+	TInt              iPhase;
+	TInquirySockAddr  iAddr;
+	TNameEntry        iEntry;
+	TBTDevAddr        iCandidate;
+	TInt              iMajor, iMinor;
+	TInt              iSlot, iRound;
+	TTime             iUntil;
+};
+
+void CBtHidHost::SelectWii( TInt aSlot )
+{
+	if( Searching())
+		return;
+	if( !iWiiFinder )
+		iWiiFinder = new CBtHidWiiFinder( *this );
+	if( iWiiFinder )
+		iWiiFinder->Start( aSlot );
+}
+
+/* lo encontro CBtHidWiiFinder: como uno elegido en el cuadro (se lo llama ya, esta en modo emparejar) */
+void CBtHidHost::WiiFound( const TBTDevAddr &aAddr, const TDesC8 &aName, TInt aSlot )
+{
+	iObserver.BtHidLog( "wiimote encontrado" );
+	AddDevice( aAddr, EBtHidGamepad, aName, KNullDesC8, 0, ETrue, aSlot );
+	Save();
+	iObserver.BtHidSearchDone( KErrNone );
+}
+
+TBool CBtHidHost::Searching() const
+{
+	return IsActive() || ( iWiiFinder && iWiiFinder->IsActive());
 }
 
 class CBtHidListener : public CActive
@@ -1567,6 +2560,7 @@ CBtHidHost::~CBtHidHost()
 	TInt i;
 
 	Cancel();
+	delete iWiiFinder;
 	delete iListenCtrl;
 	delete iListenIntr;
 	for( i = 0; i < EMaxDevices; i++ )
@@ -1614,9 +2608,36 @@ void CBtHidHost::AddDevice( const TBTDevAddr &aAddr, TInt aType, const TDesC8 &a
 		iDev[slot]->SetPlayer( aPlayer );
 	}
 	if( aCall )
+	{
 		iDev[slot]->StartAfter( 2000000 ); // recien elegido: esta en modo emparejar, hay que llamarlo
+		iFirstAddr = aAddr;
+		iFirstUntil.UniversalTime();
+		iFirstUntil += TTimeIntervalMicroSeconds32( KFirstCallUs );
+	}
 	else
 		iDev[slot]->Wait();
+}
+
+/* se puede llamar a aDev? No si ya se esta llamando a otro, ni si hay uno recien elegido (el primer minuto, hasta
+   que conecte) y no es este */
+TBool CBtHidHost::RadioBusy( const CBtHidDevice *aDev ) const
+{
+	TInt  i;
+	TBool first = EFalse;
+	TTime now;
+
+	now.UniversalTime();
+	for( i = 0; i < EMaxDevices; i++ )
+	{
+		if( !iDev[i] || iDev[i] == aDev )
+			continue;
+		if( iDev[i]->Calling())
+			return ETrue;
+		if( now < iFirstUntil && iDev[i]->Addr() == iFirstAddr && iDev[i]->State() != EBtHidConnected
+			&& iDev[i]->State() != EBtHidStopped )
+			first = ETrue;
+	}
+	return first;
 }
 
 void CBtHidHost::SelectPad( TInt aSlot )
@@ -1684,6 +2705,11 @@ void CBtHidHost::RunL()
 
 void CBtHidHost::CancelSelect()
 {
+	if( iWiiFinder && iWiiFinder->IsActive())
+	{
+		iWiiFinder->Cancel();
+		iObserver.BtHidSearchDone( KErrCancel );
+	}
 	Cancel();
 }
 
