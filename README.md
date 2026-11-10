@@ -14,6 +14,59 @@ HID** muestra en su pantalla principal los lugares Mouse, Teclado y Joystick 1 a
 centro abre sus opciones (agregar, conectar, desconectar, pasar a otro numero, quitar). Lo nuevo de cada version esta
 en [CHANGELOG.md](CHANGELOG.md).
 
+## Conectar un joystick de PS3 o PS4
+
+Hasta 4 joysticks a la vez, ademas del mouse y el teclado. Cada uno ocupa un lugar (Joystick 1 a 4) en la pantalla
+principal de la app.
+
+### De PS4 (DualShock 4 y genericos)
+
+1. En la pantalla principal, elegir un lugar de joystick vacio, apretar el centro y *Agregar un joystick aca*.
+2. Poner el joystick a emparejar: el original con **Share + PS** hasta que la luz parpadee de a dos veces; muchos
+   genericos con **PS + Start** hasta que todas las luces titilen juntas y rapido.
+3. Elegirlo en la lista del telefono (suele aparecer como "Wireless Controller"). Si pide un codigo, es `0000`.
+
+Queda guardado: despues, para conectarlo otra vez, basta apretar PS.
+
+### De PS3 (DualShock 3)
+
+El de PS3 no se empareja desde la lista: tiene guardada la direccion de su "consola" y, al apretar PS, la llama el.
+Hay que grabarle la del telefono por el cable USB, una vez, desde una computadora, con
+[`ds3pair.py`](https://raw.githubusercontent.com/Dante-Leoncini/bthid-s60/master/tools/ds3pair.py) (abrir el
+enlace y guardarlo con *Guardar como...*).
+
+1. **La direccion del telefono:** en la app, *Opciones > Joystick de PS3*; o en cualquier Nokia, marcando
+   `*#2820#` en la pantalla de inicio, como un numero (no hace falta apretar llamar). Es algo como
+   `00:1A:2B:3C:4D:5E`, o `001a2b3c4d5e` sin los dos puntos: `ds3pair.py` acepta las dos formas.
+2. **Grabarla en el joystick,** enchufado a la computadora por USB:
+   - **Linux** (Python ya viene instalado): en una terminal, en la carpeta de `ds3pair.py`:
+
+     ```
+     sudo python3 ds3pair.py 00:1A:2B:3C:4D:5E
+     ```
+
+   - **Windows:** con el driver que trae Windows no se puede (el joystick no declara ese pedido y Windows lo
+     rechaza: sale `direccion ?` y `grabado MAL`). Hay que cambiarle el driver una vez:
+     1. Instalar Python 3 de [python.org](https://www.python.org/downloads/), marcando *Add python.exe to PATH*.
+     2. En una ventana de comandos (*cmd*): `pip install pyusb libusb-package`
+     3. Con el joystick enchufado, abrir [Zadig](https://zadig.akeo.ie/): en *Options* marcar *List All Devices*,
+        elegir el joystick ("PLAYSTATION(R)3 Controller" o el nombre del generico), a la derecha de la flecha verde
+        elegir **WinUSB** y apretar *Replace Driver*.
+     4. En la carpeta de `ds3pair.py`: `python ds3pair.py 00:1A:2B:3C:4D:5E`
+
+     Con WinUSB el joystick deja de andar como joystick en esa PC (al telefono no le importa). Como volverlo atras
+     esta en [tools/PS3.md](tools/PS3.md).
+
+   Tiene que terminar en `grabado bien -> ahora llama a ...`.
+3. **Conectarlo:** desenchufar el cable y apretar PS. El joystick llama al telefono y se conecta solo.
+
+**Si dice "esta en modo Xbox 360":** muchos genericos, enchufados a una PC, se presentan como un mando de Xbox 360
+(`045e:028e`) y asi no aceptan la direccion. En Linux, `ds3pair.py` intenta pasarlo a modo PS3 (pide desenchufarlo y
+enchufarlo). Si no cambia, probarlo como uno de PS4: varios genericos de PS3, por Bluetooth, se hacen pasar por un
+DualShock 4 con PS + Start.
+
+Mas detalle, los problemas comunes y el protocolo de cada joystick: [tools/PS3.md](tools/PS3.md).
+
 ## Que se instala
 
 - `bthidhostsrv.exe`: servidor sin interfaz. Se queda con la conexion Bluetooth del mouse y el teclado
