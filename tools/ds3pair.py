@@ -7,7 +7,9 @@ que tiene guardada. Con la del telefono, llama al telefono y el driver lo atiend
     python ds3pair.py 00:1A:2B:3C:4D:5E     les graba esa direccion (la del telefono: en la app Bluetooth HID,
                                             Opciones > Joystick de PS3, o *#2820# en Nokia; va con o sin los ':')
 
-Windows (API HID del sistema) o Linux (/dev/hidraw, con sudo), sin instalar nada. El joystick va por el cable USB.
+Linux (/dev/hidraw, con sudo), sin instalar nada. El joystick va por el cable USB. En Windows el driver HID del
+sistema no deja grabarla: hay que ponerle al joystick el driver WinUSB con Zadig y tener pyusb
+(pip install pyusb libusb-package), y se le habla por libusb.
 Muchos joysticks genericos arrancan en modo Xbox 360 (045e:028e) y asi no aceptan esto. En Linux, con sudo, se
 intenta pasarlos a modo PS3: se saca un rato el driver xpad (el de Xbox) y se pide desenchufarlo y enchufarlo.
 """
@@ -216,9 +218,59 @@ if sys.platform != 'win32':
 
 import ctypes.wintypes as W
 
-hid = ctypes.WinDLL('hid')
+# Windows: el driver HID del sistema solo deja pedir y mandar los reportes que el joystick declara en su descriptor,
+# y el DualShock 3 no declara el F2 ni el F5 (los manda igual, Linux los pide sin mirar el descriptor). Por eso se
+# le habla por libusb: hace falta cambiarle el driver por WinUSB con Zadig y tener pyusb (ver tools/PS3.md).
+
+hid = ctypes.WinDLL('hid', use_last_error=True)
 setupapi = ctypes.WinDLL('setupapi')
 kernel32 = ctypes.WinDLL('kernel32')
+
+
+def libusb_pads():
+    """los joysticks de PS3 que ve libusb (pip install pyusb libusb-package); None si pyusb no esta instalado"""
+    try:
+        import libusb_package
+    except ImportError:
+        return None
+    try:
+        return [d for d in libusb_package.find(find_all=True) if (d.idVendor, d.idProduct) in PADS]
+    except Exception as e:
+        print('(libusb no anda: %s)' % e)
+        return []
+
+
+def libusb_grabar(devs, nueva):
+    """GET_REPORT / SET_REPORT por el control, como sixpair: aca el numero de reporte va en wValue y no en los datos"""
+    import usb.core
+
+    todo_bien = True
+    for k, d in enumerate(devs):
+        nombre = 'joystick %d (%04x:%04x)' % (k + 1, d.idVendor, d.idProduct)
+        try:
+            propia = bytes(d.ctrl_transfer(0xA1, 0x01, 0x03F2, 0, 17, 2000))  # la direccion del joystick: 4..9
+            llama = bytes(d.ctrl_transfer(0xA1, 0x01, 0x03F5, 0, 8, 2000))   # a quien llama: 2..7
+        except (usb.core.USBError, NotImplementedError, ValueError) as e:
+            print('%s: no se le puede hablar por libusb (%s): tiene que tener el driver WinUSB (Zadig)' % (nombre, e))
+            todo_bien = False
+            continue
+        print('%s: direccion %s, llama a %s' % (nombre, fmt(propia[4:10]), fmt(llama[2:8])))
+        if nueva:
+            try:
+                d.ctrl_transfer(0x21, 0x09, 0x03F5, 0, bytes([0x01, 0x00]) + nueva, 2000)
+                ok = True
+            except (usb.core.USBError, NotImplementedError, ValueError) as e:
+                ok = False
+                print('   no lo acepto: %s' % e)
+            try:
+                llama = bytes(d.ctrl_transfer(0xA1, 0x01, 0x03F5, 0, 8, 2000))
+            except (usb.core.USBError, NotImplementedError, ValueError):
+                llama = None
+            print('   grabado %s -> ahora llama a %s' % ('bien' if ok else 'MAL', fmt(llama[2:8]) if llama else '?'))
+            todo_bien = todo_bien and ok
+    if nueva and todo_bien:
+        print('Listo: desenchufalo y apreta PS, llama al telefono.')
+    return todo_bien
 
 
 class GUID(ctypes.Structure):
@@ -258,7 +310,7 @@ hid.HidD_SetFeature.argtypes = [W.HANDLE, ctypes.c_void_p, W.ULONG]
 
 
 def joysticks():
-    """(ruta, handle, largo de los reportes feature) de cada DualShock 3 enchufado por USB"""
+    """(handle, largo de los reportes feature, vendor, producto) de cada joystick de PS3 con el driver HID"""
     guid = GUID()
     hid.HidD_GetHidGuid(ctypes.byref(guid))
     info = setupapi.SetupDiGetClassDevsW(ctypes.byref(guid), None, None, 0x12)  # PRESENT | DEVICEINTERFACE
@@ -291,7 +343,7 @@ def joysticks():
         hid.HidD_GetPreparsedData(h, ctypes.byref(pre))
         hid.HidP_GetCaps(pre, ctypes.byref(caps))
         hid.HidD_FreePreparsedData(pre)
-        out.append((path, h, max(caps.FeatureReportByteLength, 64)))
+        out.append((h, max(caps.FeatureReportByteLength, 64), attr.VendorID, attr.ProductID))
     setupapi.SetupDiDestroyDeviceInfoList(info)
     return out
 
@@ -304,30 +356,58 @@ def get_feature(h, n, rid):
     return bytes(b)
 
 
-def main():
-    nueva = leer_direccion()
-    pads = joysticks()
-    if not pads:
-        print('No hay ningun joystick de PS3 enchufado por USB. (Si Windows lo ve como un mando de Xbox 360,')
-        print('esta en modo Xbox y asi no acepta la direccion: probar en Linux, ver tools/PS3.md.)')
-        return 1
-    for k, (path, h, n) in enumerate(pads):
-        # (en Windows el byte 0 es el numero de reporte: todo va uno mas que en sixpair, el de Linux)
+def hid_grabar(pads, nueva):
+    """por el driver HID de Windows (byte 0 = numero de reporte). Con el DualShock 3 y los que son como el no anda:
+    Windows no deja pedir el F2 ni el F5 porque no estan en el descriptor"""
+    todo_bien = True
+    for k, (h, n, ven, pro) in enumerate(pads):
         propia = get_feature(h, n, 0xF2)   # la direccion del joystick: bytes 5..10
+        err = ctypes.get_last_error() if propia is None else 0
         llama = get_feature(h, n, 0xF5)    # a quien llama: bytes 3..8
-        print('joystick %d: direccion %s, llama a %s' % (k + 1, fmt(propia[5:11]) if propia else '?',
-                                                       fmt(llama[3:9]) if llama else '?'))
+        print('joystick %d (%04x:%04x): direccion %s, llama a %s%s' % (k + 1, ven, pro,
+              fmt(propia[5:11]) if propia else '?', fmt(llama[3:9]) if llama else '?',
+              '  (Windows no deja pedirlo: error %d)' % err if err else ''))
+        todo_bien = todo_bien and propia is not None
         if nueva:
             b = (ctypes.c_ubyte * n)()
             b[0], b[1], b[2] = 0xF5, 0x01, 0x00
             for j in range(6):
                 b[3 + j] = nueva[j]
-            # (el reporte F5: el numero, 0x01 0x00 y la direccion)
             ok = hid.HidD_SetFeature(h, b, n)
+            err = ctypes.get_last_error() if not ok else 0
             llama = get_feature(h, n, 0xF5)
-            print('   grabado %s -> ahora llama a %s' % ('bien' if ok else 'MAL', fmt(llama[3:9]) if llama else '?'))
+            print('   grabado %s -> ahora llama a %s%s' % ('bien' if ok else 'MAL', fmt(llama[3:9]) if llama else '?',
+                  '  (error %d)' % err if err else ''))
+            todo_bien = todo_bien and ok
         kernel32.CloseHandle(h)
-    return 0
+    if nueva and todo_bien:
+        print('Listo: desenchufalo y apreta PS, llama al telefono.')
+    return todo_bien
+
+
+def main():
+    nueva = leer_direccion()
+    usbs = libusb_pads()
+    if usbs and libusb_grabar(usbs, nueva):
+        return 0
+    pads = joysticks()
+    if pads and hid_grabar(pads, nueva):
+        return 0
+    print()
+    if not usbs and not pads:
+        print('No hay ningun joystick de PS3 enchufado por USB.')
+        if usbs is None:
+            print('(Si ya le pusiste el driver WinUSB con Zadig, falta: pip install pyusb libusb-package)')
+        print('(Si Windows lo ve como un mando de Xbox 360, esta en modo Xbox y asi no acepta la direccion:')
+        print('ver tools/PS3.md.)')
+        return 1
+    print('Windows no deja grabarle la direccion con su driver. Hay que hacer esto una vez (ver tools/PS3.md):')
+    if usbs is None:
+        print('  1. pip install pyusb libusb-package')
+    print('  %s. Zadig (zadig.akeo.ie): Options > List All Devices, elegir el joystick, WinUSB y Replace Driver'
+          % ('2' if usbs is None else '1'))
+    print('  y despues correr esto de nuevo.')
+    return 1
 
 
 if __name__ == '__main__':

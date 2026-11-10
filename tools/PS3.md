@@ -7,8 +7,8 @@ una vez por joystick. Eso hace `ds3pair.py`.
 ## Qué hace falta
 
 - El teléfono con *Bluetooth HID* instalado.
-- Una computadora con Linux (Python 3 ya viene instalado). En Windows anda solo con el DualShock 3 original
-  (ver más abajo).
+- Una computadora con Linux (Python 3 ya viene instalado) o con Windows (hay que instalar Python y cambiarle el
+  driver al joystick una vez, ver más abajo).
 - El cable USB del joystick (mini USB, el de cargarlo).
 - [`ds3pair.py`](https://raw.githubusercontent.com/Dante-Leoncini/bthid-s60/master/tools/ds3pair.py): abrir el
   enlace y guardar la página (*Guardar como...*) con ese nombre.
@@ -62,14 +62,35 @@ vendor:producto a `PADS` en `ds3pair.py`.
 
 ## En Windows
 
-Anda con el DualShock 3 original (aparece como "PLAYSTATION(R)3 Controller", `054C:0268`). Hace falta Python 3
-([python.org](https://www.python.org/downloads/)), y se corre igual pero sin `sudo`:
+Con el driver que trae Windows no se puede grabar la dirección: el joystick de PS3 no declara ese pedido y Windows
+lo rechaza. `ds3pair.py` muestra `direccion ?, llama a ?` y `grabado MAL` (error 87). Hay que cambiarle el driver
+al joystick por uno genérico (WinUSB) una vez, con Zadig:
 
-```
-python ds3pair.py 00:1A:2B:3C:4D:5E
-```
+1. Instalar Python 3 de [python.org](https://www.python.org/downloads/). Al instalarlo, marcar
+   *Add python.exe to PATH*.
+2. Abrir una ventana de comandos (*cmd*) y correr:
 
-Los genéricos en Windows casi siempre arrancan en modo Xbox 360 y ahí no aceptan la dirección: usar Linux.
+   ```
+   pip install pyusb libusb-package
+   ```
+
+3. Enchufar el joystick. Bajar Zadig de [zadig.akeo.ie](https://zadig.akeo.ie/) y abrirlo. En *Options* marcar
+   *List All Devices*, elegir el joystick en la lista ("PLAYSTATION(R)3 Controller", o el nombre del genérico), a
+   la derecha de la flecha verde elegir **WinUSB** y apretar *Replace Driver*.
+4. En la carpeta de `ds3pair.py`, con la dirección del teléfono:
+
+   ```
+   python ds3pair.py 00:1A:2B:3C:4D:5E
+   ```
+
+   Tiene que terminar en `grabado bien`.
+
+Con WinUSB el joystick deja de andar como joystick en esa PC (al teléfono no le importa). Para dejarlo como
+estaba: *Administrador de dispositivos*, el joystick (ahora en *Dispositivos de bus serie universal*), clic derecho >
+*Desinstalar el dispositivo*, marcar la casilla de quitar el controlador, y desenchufarlo y enchufarlo.
+
+Los genéricos que Windows ve como un mando de Xbox 360 no aceptan la dirección ni así: usar Linux, o buscarlos por
+Bluetooth (más abajo).
 
 ## 3. Conectarlo
 
