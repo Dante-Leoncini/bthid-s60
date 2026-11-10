@@ -140,7 +140,9 @@ def linux_sacar_de_xbox(xbox):
 
 
 def linux_grabar(pads, nueva):
-    """por /dev/hidraw: HIDIOCGFEATURE / HIDIOCSFEATURE (el byte 0 es el numero de reporte, como en Windows)"""
+    """por /dev/hidraw: HIDIOCGFEATURE / HIDIOCSFEATURE, como el plugin sixaxis de BlueZ. El byte 0 va con el numero
+    de reporte y lo leido llega tal cual lo manda el joystick: la direccion propia en los bytes 4..9 del F2 y a quien
+    llama en los 2..7 del F5. Para grabar: F5 01 y la direccion (8 bytes)"""
     import fcntl
 
     def ioc(dirn, nr, size):
@@ -155,8 +157,7 @@ def linux_grabar(pads, nueva):
                   e.strerror))
             todo_bien = False
             continue
-        n = 64
-        def get(rid):
+        def get(rid, n):
             b = bytearray(n)
             b[0] = rid
             try:
@@ -164,22 +165,21 @@ def linux_grabar(pads, nueva):
                 return bytes(b)
             except OSError:
                 return None
-        propia = get(0xF2)
-        llama = get(0xF5)
+        propia = get(0xF2, 18)
+        llama = get(0xF5, 8)
         print('joystick %s (%04x:%04x %s): direccion %s, llama a %s' % (path, ven, pro, name,
-              fmt(propia[5:11]) if propia else '?', fmt(llama[3:9]) if llama else '?'))
+              fmt(propia[4:10]) if propia else '?', fmt(llama[2:8]) if llama else '?'))
         if nueva:
-            b = bytearray(8)
-            b[0], b[1], b[2] = 0xF5, 0x01, 0x00
-            b[3:9] = nueva
+            b = bytearray([0xF5, 0x01]) + nueva
             try:
                 fcntl.ioctl(fd, ioc(3, 0x06, len(b)), b)  # HIDIOCSFEATURE
                 ok = True
             except OSError as e:
                 ok = False
                 print('   no lo acepto: %s' % e)
-            llama = get(0xF5)
-            print('   grabado %s -> ahora llama a %s' % ('bien' if ok else 'MAL', fmt(llama[3:9]) if llama else '?'))
+            llama = get(0xF5, 8)
+            ok = ok and llama is not None and llama[2:8] == nueva
+            print('   grabado %s -> ahora llama a %s' % ('bien' if ok else 'MAL', fmt(llama[2:8]) if llama else '?'))
             todo_bien = todo_bien and ok
         os.close(fd)
     if nueva and todo_bien:
@@ -240,36 +240,62 @@ def libusb_pads():
 
 
 def libusb_grabar(devs, nueva):
-    """GET_REPORT / SET_REPORT por el control, como sixpair: aca el numero de reporte va en wValue y no en los datos"""
+    """GET_REPORT / SET_REPORT por el control, como sixpair: el numero de reporte va en wValue y lo leido llega tal
+    cual lo manda el joystick (la direccion propia en 4..9 del F2, a quien llama en 2..7 del F5). Cada pedido se
+    prueba con los largos y formatos de sixpair, del kernel y de BlueZ; la direccion propia es solo para mostrar.
+    Devuelve 'bien', 'driver' (no tiene WinUSB) o 'rechazo' (el joystick no contesto los pedidos)"""
     import usb.core
 
-    todo_bien = True
+    def falla_driver(e):
+        # libusb: -3 sin permiso, -5 no encontrado, -12 no soportado (sigue con el driver HID)
+        return isinstance(e, NotImplementedError) or getattr(e, 'backend_error_code', None) in (-3, -5, -12)
+
+    def pedir(d, *intentos):
+        """(lo que devolvio el primer intento que anduvo, None) o (None, el ultimo error)"""
+        err = None
+        for args in intentos:
+            try:
+                r = d.ctrl_transfer(*args, timeout=2000)
+                return (bytes(r) if not isinstance(r, int) else r), None
+            except (usb.core.USBError, NotImplementedError, ValueError) as e:
+                err = e
+        return None, err
+
+    estado = 'bien'
     for k, d in enumerate(devs):
         nombre = 'joystick %d (%04x:%04x)' % (k + 1, d.idVendor, d.idProduct)
-        try:
-            propia = bytes(d.ctrl_transfer(0xA1, 0x01, 0x03F2, 0, 17, 2000))  # la direccion del joystick: 4..9
-            llama = bytes(d.ctrl_transfer(0xA1, 0x01, 0x03F5, 0, 8, 2000))   # a quien llama: 2..7
-        except (usb.core.USBError, NotImplementedError, ValueError) as e:
-            print('%s: no se le puede hablar por libusb (%s): tiene que tener el driver WinUSB (Zadig)' % (nombre, e))
-            todo_bien = False
-            continue
-        print('%s: direccion %s, llama a %s' % (nombre, fmt(propia[4:10]), fmt(llama[2:8])))
+        propia, e1 = pedir(d, (0xA1, 0x01, 0x03F2, 0, 17), (0xA1, 0x01, 0x03F2, 0, 18))
+        llama, e2 = pedir(d, (0xA1, 0x01, 0x03F5, 0, 8))
+        print('%s: direccion %s, llama a %s' % (nombre, fmt(propia[4:10]) if propia and len(propia) >= 10 else '?',
+              fmt(llama[2:8]) if llama and len(llama) >= 8 else '?'))
+        errores = []
+        for que, e in (('su direccion', e1), ('a quien llama', e2)):
+            if e:
+                print('   no contesto %s: %s' % (que, e))
+                errores.append(e)
         if nueva:
-            try:
-                d.ctrl_transfer(0x21, 0x09, 0x03F5, 0, bytes([0x01, 0x00]) + nueva, 2000)
-                ok = True
-            except (usb.core.USBError, NotImplementedError, ValueError) as e:
+            r, e3 = pedir(d, (0x21, 0x09, 0x03F5, 0, bytes([0x01, 0x00]) + nueva),   # como sixpair
+                          (0x21, 0x09, 0x03F5, 0, bytes([0xF5, 0x01]) + nueva))      # como BlueZ
+            if e3:
+                print('   no acepto la direccion: %s' % e3)
+                errores.append(e3)
+            llama, _ = pedir(d, (0xA1, 0x01, 0x03F5, 0, 8))
+            if e3:
                 ok = False
-                print('   no lo acepto: %s' % e)
-            try:
-                llama = bytes(d.ctrl_transfer(0xA1, 0x01, 0x03F5, 0, 8, 2000))
-            except (usb.core.USBError, NotImplementedError, ValueError):
-                llama = None
-            print('   grabado %s -> ahora llama a %s' % ('bien' if ok else 'MAL', fmt(llama[2:8]) if llama else '?'))
-            todo_bien = todo_bien and ok
-    if nueva and todo_bien:
+            elif llama and len(llama) >= 8:
+                ok = llama[2:8] == nueva
+            else:
+                ok = True  # lo acepto, pero no deja leerlo para comprobar
+            print('   grabado %s -> ahora llama a %s' % ('bien' if ok else 'MAL',
+                  fmt(llama[2:8]) if llama and len(llama) >= 8 else '? (no se pudo comprobar)'))
+            fallo = not ok
+        else:
+            fallo = propia is None and llama is None
+        if fallo and estado != 'driver':
+            estado = 'driver' if any(falla_driver(e) for e in errores) else 'rechazo'
+    if nueva and estado == 'bien':
         print('Listo: desenchufalo y apreta PS, llama al telefono.')
-    return todo_bien
+    return estado
 
 
 class GUID(ctypes.Structure):
@@ -356,26 +382,26 @@ def get_feature(h, n, rid):
 
 
 def hid_grabar(pads, nueva):
-    """por el driver HID de Windows (byte 0 = numero de reporte). Con el DualShock 3 y los que son como el no anda:
-    Windows no deja pedir el F2 ni el F5 porque no estan en el descriptor"""
+    """por el driver HID de Windows (byte 0 = numero de reporte, lo leido llega tal cual: como en Linux). Con el
+    DualShock 3 y los que son como el no anda: Windows no deja pedir el F2 ni el F5 porque no estan en el descriptor"""
     todo_bien = True
     for k, (h, n, ven, pro) in enumerate(pads):
-        propia = get_feature(h, n, 0xF2)   # la direccion del joystick: bytes 5..10
+        propia = get_feature(h, n, 0xF2)   # la direccion del joystick: bytes 4..9
         err = ctypes.get_last_error() if propia is None else 0
-        llama = get_feature(h, n, 0xF5)    # a quien llama: bytes 3..8
+        llama = get_feature(h, n, 0xF5)    # a quien llama: bytes 2..7
         print('joystick %d (%04x:%04x): direccion %s, llama a %s%s' % (k + 1, ven, pro,
-              fmt(propia[5:11]) if propia else '?', fmt(llama[3:9]) if llama else '?',
+              fmt(propia[4:10]) if propia else '?', fmt(llama[2:8]) if llama else '?',
               '  (Windows no deja pedirlo: error %d)' % err if err else ''))
         todo_bien = todo_bien and propia is not None
         if nueva:
             b = (ctypes.c_ubyte * n)()
-            b[0], b[1], b[2] = 0xF5, 0x01, 0x00
+            b[0], b[1] = 0xF5, 0x01
             for j in range(6):
-                b[3 + j] = nueva[j]
+                b[2 + j] = nueva[j]
             ok = hid.HidD_SetFeature(h, b, n)
             err = ctypes.get_last_error() if not ok else 0
             llama = get_feature(h, n, 0xF5)
-            print('   grabado %s -> ahora llama a %s%s' % ('bien' if ok else 'MAL', fmt(llama[3:9]) if llama else '?',
+            print('   grabado %s -> ahora llama a %s%s' % ('bien' if ok else 'MAL', fmt(llama[2:8]) if llama else '?',
                   '  (error %d)' % err if err else ''))
             todo_bien = todo_bien and ok
         kernel32.CloseHandle(h)
@@ -387,8 +413,14 @@ def hid_grabar(pads, nueva):
 def main():
     nueva = leer_direccion()
     usbs = libusb_pads()
-    if usbs and libusb_grabar(usbs, nueva):
+    estado = libusb_grabar(usbs, nueva) if usbs else None
+    if estado == 'bien':
         return 0
+    if estado == 'rechazo':
+        print()
+        print('El joystick tiene el driver WinUSB, pero no contesto los pedidos. Probar desenchufarlo, enchufarlo en')
+        print('otro puerto USB (directo a la PC, sin hub) y correr esto de nuevo. Si sigue igual, probar en Linux.')
+        return 1
     pads = joysticks()
     if pads and hid_grabar(pads, nueva):
         return 0
