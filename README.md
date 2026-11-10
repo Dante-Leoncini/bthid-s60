@@ -54,6 +54,17 @@ enchufarlo). Si sigue en modo Xbox, a ese joystick no se le puede grabar la dire
 
 Mas detalle, los problemas comunes y el protocolo: [tools/PS3.md](tools/PS3.md).
 
+## Joystick de PS4 (DualShock 4): sin confirmar
+
+**No esta confirmado que ande.** El driver tiene soporte para el de PS4, pero no lo pudimos comprobar nosotros. Un
+usuario conto que le funciono. Si lo probas, avisa si anduvo o no, y con que telefono.
+
+Para probarlo:
+
+1. En la pantalla principal, elegir un lugar de joystick vacio, apretar el centro y *Agregar un joystick aca*.
+2. Poner el joystick a emparejar: el original con **Share + PS** hasta que la luz parpadee de a dos veces.
+3. Elegirlo en la lista del telefono (suele aparecer como "Wireless Controller"). Si pide un codigo, es `0000`.
+
 ## Que se instala
 
 - `bthidhostsrv.exe`: servidor sin interfaz. Se queda con la conexion Bluetooth del mouse y el teclado
