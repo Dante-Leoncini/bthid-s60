@@ -14,21 +14,9 @@ HID** muestra en su pantalla principal los lugares Mouse, Teclado y Joystick 1 a
 centro abre sus opciones (agregar, conectar, desconectar, pasar a otro numero, quitar). Lo nuevo de cada version esta
 en [CHANGELOG.md](CHANGELOG.md).
 
-## Conectar un joystick de PS3 o PS4
+## Conectar un joystick de PS3 (DualShock 3)
 
-Hasta 4 joysticks a la vez, ademas del mouse y el teclado. Cada uno ocupa un lugar (Joystick 1 a 4) en la pantalla
-principal de la app.
-
-### De PS4 (DualShock 4 y genericos)
-
-1. En la pantalla principal, elegir un lugar de joystick vacio, apretar el centro y *Agregar un joystick aca*.
-2. Poner el joystick a emparejar: el original con **Share + PS** hasta que la luz parpadee de a dos veces; muchos
-   genericos con **PS + Start** hasta que todas las luces titilen juntas y rapido.
-3. Elegirlo en la lista del telefono (suele aparecer como "Wireless Controller"). Si pide un codigo, es `0000`.
-
-Queda guardado: despues, para conectarlo otra vez, basta apretar PS.
-
-### De PS3 (DualShock 3)
+Cada joystick ocupa un lugar (Joystick 1 a 4) en la pantalla principal de la app.
 
 El de PS3 no se empareja desde la lista: tiene guardada la direccion de su "consola" y, al apretar PS, la llama el.
 Hay que grabarle la del telefono por el cable USB, una vez, desde una computadora, con
@@ -62,10 +50,9 @@ enlace y guardarlo con *Guardar como...*).
 
 **Si dice "esta en modo Xbox 360":** muchos genericos, enchufados a una PC, se presentan como un mando de Xbox 360
 (`045e:028e`) y asi no aceptan la direccion. En Linux, `ds3pair.py` intenta pasarlo a modo PS3 (pide desenchufarlo y
-enchufarlo). Si no cambia, probarlo como uno de PS4: varios genericos de PS3, por Bluetooth, se hacen pasar por un
-DualShock 4 con PS + Start.
+enchufarlo). Si sigue en modo Xbox, a ese joystick no se le puede grabar la direccion.
 
-Mas detalle, los problemas comunes y el protocolo de cada joystick: [tools/PS3.md](tools/PS3.md).
+Mas detalle, los problemas comunes y el protocolo: [tools/PS3.md](tools/PS3.md).
 
 ## Que se instala
 
@@ -94,7 +81,7 @@ como su actualizacion y lo reemplaza.
 
 ## El joystick como teclado
 
-Con *Opciones > Joystick como teclado: si*, los botones de los joysticks (DualShock 3 y 4, hasta 4) mandan teclas.
+Con *Opciones > Joystick como teclado: si*, los botones de los joysticks (hasta 4) mandan teclas.
 Llegan a TODAS las apps y al menu del telefono, como si fueran las del teclado del telefono (el servidor las inyecta
 al sistema con `RWsSession::SimulateRawEvent`, por eso pide la capacidad `SwEvent`). A la app que esta adelante, si
 lee los joysticks directo (`RBtHidManager::PadState`), no se le mandan: asi un juego que usa el joystick no recibe todo

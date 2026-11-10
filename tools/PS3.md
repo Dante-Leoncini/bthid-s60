@@ -51,9 +51,7 @@ desenchufar el joystick y enchufarlo de nuevo, sin apretar nada. Es lo que pasa 
 Xbox y el joystick cambia de modo. Si aparece como joystick de PS3, le graba la dirección enseguida. Al terminar el
 driver de Xbox vuelve solo (y si se corta a la mitad, vuelve al reiniciar la computadora).
 
-Si termina en `Sigue en modo Xbox`, ese joystick no se deja grabar desde la PC. Probar la búsqueda de Bluetooth
-(más abajo): hubo genéricos que nunca salieron del modo Xbox por USB pero se dejaban encontrar por Bluetooth con
-PS + Start.
+Si termina en `Sigue en modo Xbox`, a ese joystick no se le puede grabar la dirección desde la PC.
 
 ### Si dice "no es de PS3"
 
@@ -89,25 +87,12 @@ Con WinUSB el joystick deja de andar como joystick en esa PC (al teléfono no le
 estaba: *Administrador de dispositivos*, el joystick (ahora en *Dispositivos de bus serie universal*), clic derecho >
 *Desinstalar el dispositivo*, marcar la casilla de quitar el controlador, y desenchufarlo y enchufarlo.
 
-Los genéricos que Windows ve como un mando de Xbox 360 no aceptan la dirección ni así: usar Linux, o buscarlos por
-Bluetooth (más abajo).
+Los genéricos que Windows ve como un mando de Xbox 360 no aceptan la dirección ni así: probar en Linux.
 
 ## 3. Conectarlo
 
 Desenchufar el USB y apretar PS: el joystick llama al teléfono. El driver (desde la versión 0.2) lo atiende,
 le prende la luz de su número (1 a 4) y la app tiene la prueba en *Pruebas > Joysticks*.
-
-## Si el genérico no acepta la dirección: buscarlo por Bluetooth
-
-Muchos genéricos también se dejan encontrar en la búsqueda de Bluetooth, como un mouse, sin grabar nada por USB:
-
-1. Desenchufar el cable USB.
-2. Mantener PS + Start hasta que las luces titilen rápido (si no, probar PS + Select, o PS solo).
-3. Enseguida, mientras titila: *Bluetooth HID > Opciones > Elegir mouse* en el teléfono. A los pocos segundos de
-   titilar deja de dejarse encontrar; si no aparece, repetir desde el paso 2.
-
-Suelen aparecer como **"Wireless Controller"**: en Bluetooth se hacen pasar por un joystick de PS4 (DualShock 4,
-`054C:05C4`), no de PS3.
 
 ## El protocolo (lo que hace el driver)
 
@@ -120,19 +105,3 @@ Suelen aparecer como **"Wireless Controller"**: en Bluetooth se hacen pasar por 
   grande, byte 11 las luces (0x02 = luz 1 ... 0x10 = luz 4).
 - Grabarle la dirección (por USB, lo que hace `ds3pair.py`): SET_REPORT feature `0xF5` = `01 00` + la dirección
   del teléfono. GET_REPORT `0xF5` devuelve a quién llama (bytes 2-7) y `0xF2` la dirección del joystick (4-9).
-
-### Genéricos que en Bluetooth son de PS4
-
-Con PS + Start (todas las luces titilando juntas y rápido) se dejan encontrar como "Wireless Controller", clase
-`0x002508` (joystick), con servicio HID y PnP `054C:05C4` (DualShock 4).
-
-- Conexión: la abre el host, en los canales HID 0x11 y 0x13, sin emparejar ni autenticación (probado desde
-  Linux con un socket L2CAP sin seguridad: conecta y manda reportes enseguida). A veces el primer intento da
-  "page timeout" y el siguiente conecta.
-- Reportes: `A1 01` + 9 bytes, unos 200 por segundo: LX LY RX RY (0-255, 0x80 al centro); byte 4 con la cruceta
-  en los 4 bits bajos (0-7 desde arriba en sentido horario, 8 = suelta) y cuadrado, cruz, círculo, triángulo en
-  los bits 4-7; byte 5 L1 R1 L2 R2 Share Options L3 R3 (bits 0-7); byte 6 bit 0 = PS; bytes 7 y 8 la presión de L2
-  y R2. (Es el formato del DualShock 4; en el clon que se probó, todo suelto da `80 80 80 80 08 00 00 00 00`.)
-- Sin confirmar: después de la primera conexión, al volver a ponerlo a titilar ya no se dejó conectar desde la PC.
-  Puede que guarde a quién se conectó y lo llame él, como el DualShock 4 (en ese caso el driver tiene que atender
-  la llamada entrante).

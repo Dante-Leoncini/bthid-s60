@@ -129,8 +129,7 @@ def linux_sacar_de_xbox(xbox):
             if volvio and time.time() - volvio > 30:
                 break
             antes = ahora
-        print('Sigue en modo Xbox: este joystick no se deja pasar a modo PS3 desde la PC. Probar por Bluetooth:')
-        print('desenchufarlo, mantener PS + Start hasta que titile y buscarlo desde el telefono (ver tools/PS3.md).')
+        print('Sigue en modo Xbox: a este joystick no se le puede grabar la direccion desde la PC.')
         return []
     finally:
         try:
