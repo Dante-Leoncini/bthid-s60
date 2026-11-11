@@ -14,6 +14,9 @@ HID** muestra en su pantalla principal los lugares Mouse, Teclado y Joystick 1 a
 centro abre sus opciones (agregar, conectar, desconectar, pasar a otro numero, quitar). Lo nuevo de cada version esta
 en [CHANGELOG.md](CHANGELOG.md).
 
+**Si el telefono pide un codigo** al conectar un mouse, un teclado o un joystick: casi siempre es `0000` (cuatro
+ceros). Probar con ese.
+
 ## Conectar un joystick de PS3 (DualShock 3)
 
 Cada joystick ocupa un lugar (Joystick 1 a 4) en la pantalla principal de la app.
@@ -52,6 +55,11 @@ enlace y guardarlo con *Guardar como...*).
 (`045e:028e`) y asi no aceptan la direccion. En Linux, `ds3pair.py` intenta pasarlo a modo PS3 (pide desenchufarlo y
 enchufarlo). Si sigue en modo Xbox, a ese joystick no se le puede grabar la direccion.
 
+**Si no anda:** cada vez que corre, `ds3pair.py` deja un archivo `ds3pair.log` en su carpeta (al final dice
+donde). Tiene el detalle de lo que paso: que le pidio al joystick y que contesto, que hay enchufado por USB y con que
+driver, y las versiones de Windows o Linux y de Python. Mandalo a quien te este ayudando, o adjuntalo en un
+[issue](https://github.com/Dante-Leoncini/bthid-s60/issues). Tiene la direccion del telefono y la del joystick.
+
 Mas detalle, los problemas comunes y el protocolo: [tools/PS3.md](tools/PS3.md).
 
 ## Joystick de PS4 (DualShock 4): sin confirmar
@@ -63,7 +71,8 @@ Para probarlo:
 
 1. En la pantalla principal, elegir un lugar de joystick vacio, apretar el centro y *Agregar un joystick aca*.
 2. Poner el joystick a emparejar: el original con **Share + PS** hasta que la luz parpadee de a dos veces.
-3. Elegirlo en la lista del telefono (suele aparecer como "Wireless Controller"). Si pide un codigo, es `0000`.
+3. Elegirlo en la lista del telefono (suele aparecer como "Wireless Controller"). Si pide un codigo, casi siempre es
+   `0000`.
 
 ## Que se instala
 

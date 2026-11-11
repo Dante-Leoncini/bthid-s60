@@ -12,10 +12,15 @@ sistema no deja grabarla: hay que ponerle al joystick el driver WinUSB con Zadig
 (pip install pyusb libusb-package), y se le habla por libusb.
 Muchos joysticks genericos arrancan en modo Xbox 360 (045e:028e) y asi no aceptan esto. En Linux, con sudo, se
 intenta pasarlos a modo PS3: se saca un rato el driver xpad (el de Xbox) y se pide desenchufarlo y enchufarlo.
+
+Cada vez que corre deja ds3pair.log en su carpeta: lo que mostro, cada pedido al joystick con lo que contesto
+(bytes) o el error, que hay enchufado por USB y con que driver, y las versiones. Si no anda, se manda ese archivo.
 """
 import ctypes
 import os
 import sys
+import time
+import traceback
 
 SONY, DS3 = 0x054C, 0x0268
 # genericos que hablan como el DualShock 3 (vendor, producto)
@@ -26,6 +31,114 @@ XBOX = (0x045E, 0x028E)
 
 def fmt(a):
     return ':'.join('%02X' % x for x in a)
+
+
+def hx(b):
+    return ' '.join('%02X' % x for x in b) if b is not None else '-'
+
+
+LOG = None       # el archivo ds3pair.log
+LOG_RUTA = None
+INICIO = time.time()
+
+
+def log(texto):
+    """solo al log, no a la pantalla: el detalle, para saber que paso cuando falla"""
+    if LOG:
+        try:
+            LOG.write('[%6.2f] %s\n' % (time.time() - INICIO, texto))
+            LOG.flush()
+        except Exception:
+            pass
+
+
+class Tee:
+    """lo que se muestra en la pantalla va tambien al log"""
+
+    def __init__(self, pantalla):
+        self.pantalla = pantalla
+
+    def write(self, s):
+        self.pantalla.write(s)
+        if LOG:
+            try:
+                LOG.write(s)
+                LOG.flush()
+            except Exception:
+                pass
+
+    def flush(self):
+        self.pantalla.flush()
+
+    def __getattr__(self, n):
+        return getattr(self.pantalla, n)
+
+
+def abrir_log():
+    """ds3pair.log en la carpeta del script (o en la actual); se pisa cada vez que corre"""
+    global LOG, LOG_RUTA
+    import hashlib
+    import platform
+
+    script = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ''
+    for carpeta in (os.path.dirname(script), os.getcwd()):
+        ruta = os.path.join(carpeta or '.', 'ds3pair.log')
+        try:
+            LOG = open(ruta, 'w', encoding='utf-8')
+            LOG_RUTA = ruta
+            break
+        except OSError:
+            continue
+    if not LOG:
+        return
+    if os.environ.get('SUDO_UID'):  # con sudo: que quede del usuario, para poder abrirlo y borrarlo
+        try:
+            os.chown(LOG_RUTA, int(os.environ['SUDO_UID']), int(os.environ.get('SUDO_GID', -1)))
+        except (OSError, ValueError):
+            pass
+    try:
+        version = hashlib.sha1(open(script, 'rb').read()).hexdigest()[:10]
+    except Exception:
+        version = '?'
+    LOG.write('ds3pair.log - si no anduvo, mandar este archivo a quien te este ayudando\n')
+    LOG.write('Tiene la direccion del telefono y la del joystick, lo enchufado por USB y las versiones.\n\n')
+    log('fecha %s' % time.strftime('%Y-%m-%d %H:%M:%S'))
+    log('ds3pair %s (sha1 del script)' % version)
+    log('sistema %s, %s' % (platform.platform(), platform.machine()))
+    log('python %s, %d bits' % (platform.python_version(), ctypes.sizeof(ctypes.c_void_p) * 8))
+    log('comando ds3pair.py %s' % ' '.join(sys.argv[1:]))
+    sys.stdout = Tee(sys.stdout)
+
+
+def seguro(fn, *args):
+    """los diagnosticos no pueden cortar el programa: si fallan, al log"""
+    try:
+        return fn(*args)
+    except Exception:
+        log('(%s fallo)\n%s' % (fn.__name__, traceback.format_exc()))
+
+
+def correr(fn):
+    abrir_log()
+    pantalla = sys.stdout
+    try:
+        codigo = fn()
+    except SystemExit as e:
+        codigo = e.code if isinstance(e.code, int) else 1
+    except Exception as e:
+        log(traceback.format_exc())
+        print('Error inesperado: %r' % e)
+        codigo = 1
+    log('salida %s' % codigo)
+    if codigo and LOG_RUTA:
+        print()
+        print('Si no anduvo, manda este archivo a quien te este ayudando, tiene el detalle de lo que paso:')
+        print('   ' + LOG_RUTA)
+    if isinstance(pantalla, Tee):
+        sys.stdout = pantalla.pantalla
+    if LOG:
+        LOG.close()
+    return codigo
 
 
 def direccion(texto):
@@ -101,7 +214,9 @@ def linux_sacar_de_xbox(xbox):
             os.makedirs('/run/modprobe.d')
         with open(bloqueo, 'w') as f:
             f.write('blacklist xpad\n')  # que no se vuelva a cargar solo al enchufarlo
-        if subprocess.call(['modprobe', '-r', 'xpad']) != 0:
+        r = subprocess.call(['modprobe', '-r', 'xpad'])
+        log('modprobe -r xpad -> %d, xpad cargado: %s' % (r, os.path.isdir('/sys/module/xpad')))
+        if r != 0:
             print('No se pudo sacar el driver xpad (esta en uso, o viene dentro del kernel).')
             return []
         print()
@@ -161,9 +276,11 @@ def linux_grabar(pads, nueva):
             b = bytearray(n)
             b[0] = rid
             try:
-                fcntl.ioctl(fd, ioc(3, 0x07, n), b)  # HIDIOCGFEATURE
+                r = fcntl.ioctl(fd, ioc(3, 0x07, n), b)  # HIDIOCGFEATURE
+                log('   GET feature %02X (%d) -> ioctl %s: %s' % (rid, n, r, hx(b)))
                 return bytes(b)
-            except OSError:
+            except OSError as e:
+                log('   GET feature %02X (%d) -> error %s' % (rid, n, e))
                 return None
         propia = get(0xF2, 18)
         llama = get(0xF5, 8)
@@ -172,10 +289,12 @@ def linux_grabar(pads, nueva):
         if nueva:
             b = bytearray([0xF5, 0x01]) + nueva
             try:
-                fcntl.ioctl(fd, ioc(3, 0x06, len(b)), b)  # HIDIOCSFEATURE
+                r = fcntl.ioctl(fd, ioc(3, 0x06, len(b)), b)  # HIDIOCSFEATURE
+                log('   SET feature %s -> %s' % (hx(b), r))
                 ok = True
             except OSError as e:
                 ok = False
+                log('   SET feature %s -> error %s' % (hx(b), e))
                 print('   no lo acepto: %s' % e)
             llama = get(0xF5, 8)
             ok = ok and llama is not None and llama[2:8] == nueva
@@ -187,7 +306,70 @@ def linux_grabar(pads, nueva):
     return 0 if todo_bien else 1
 
 
+def linux_diagnostico():
+    """al log: los modulos, cada cosa USB con el driver de cada interfaz, y cada hidraw"""
+    import glob
+
+    log('usuario %d (0 = sudo)' % os.geteuid())
+    try:
+        log('kernel %s' % open('/proc/sys/kernel/osrelease').read().strip())
+    except OSError:
+        pass
+    log('modulos: ' + ', '.join('%s %s' % (m, 'si' if os.path.isdir('/sys/module/' + m) else 'no')
+                                for m in ('xpad', 'hid_sony', 'hid_generic', 'usbhid')))
+    for ven, pro, nombre, d in linux_usb():
+        if ven == 0x1D6B:  # los hubs de la PC
+            continue
+        drivers = []
+        for i in sorted(glob.glob(d + ':*')):
+            try:
+                drivers.append('%s=%s' % (i.rsplit(':', 1)[1], os.path.basename(os.readlink(i + '/driver'))))
+            except OSError:
+                drivers.append('%s=sin driver' % i.rsplit(':', 1)[1])
+        log('usb %s %04x:%04x %s [%s]' % (os.path.basename(d), ven, pro, nombre, ', '.join(drivers)))
+    for dev in sorted(glob.glob('/sys/class/hidraw/hidraw*')):
+        try:
+            uevent = dict(l.split('=', 1) for l in open(dev + '/device/uevent').read().splitlines() if '=' in l)
+        except OSError:
+            continue
+        log('%s %s %s' % (os.path.basename(dev), uevent.get('HID_ID', '?'), uevent.get('HID_NAME', '')))
+        try:
+            _, ven, pro = uevent['HID_ID'].split(':')
+            if (int(ven, 16), int(pro, 16)) in PADS:
+                desc = open(dev + '/device/report_descriptor', 'rb').read()
+                log('   descriptor (%d bytes): %s' % (len(desc), hx(desc)))
+        except (KeyError, ValueError, OSError):
+            pass
+
+
+def linux_dmesg():
+    """al log: lo ultimo que dijo el kernel del USB y de los joysticks (hace falta sudo)"""
+    import subprocess
+
+    try:
+        out = subprocess.run(['dmesg'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+    except Exception as e:
+        log('dmesg: %r' % e)
+        return
+    if out.returncode:
+        log('dmesg -> %d: %s' % (out.returncode, out.stderr.decode('utf-8', 'replace').strip()))
+    lineas = [l for l in out.stdout.decode('utf-8', 'replace').splitlines()
+              if any(p in l.lower() for p in ('usb', 'hid', 'xpad', 'sony', 'input', 'xbox'))
+              and 'serialnumber' not in l.lower()]
+    log('dmesg (ultimas %d de %d):' % (min(len(lineas), 40), len(lineas)))
+    for l in lineas[-40:]:
+        log('   ' + l)
+
+
 def linux_main(nueva):
+    seguro(linux_diagnostico)
+    try:
+        return linux_pasos(nueva)
+    finally:
+        seguro(linux_dmesg)
+
+
+def linux_pasos(nueva):
     pads = linux_joysticks(True)
     if not pads:
         xbox = [u for u in linux_usb() if u[:2] == XBOX]
@@ -213,7 +395,7 @@ def leer_direccion():
 
 
 if sys.platform != 'win32':
-    sys.exit(linux_main(leer_direccion()))
+    sys.exit(correr(lambda: linux_main(leer_direccion())))
 
 import ctypes.wintypes as W
 
@@ -254,16 +436,24 @@ def libusb_grabar(devs, nueva):
         """(lo que devolvio el primer intento que anduvo, None) o (None, el ultimo error)"""
         err = None
         for args in intentos:
+            que = '%02X %02X %04X %s' % (args[0], args[1], args[2],
+                                         args[4] if isinstance(args[4], int) else hx(args[4]))
             try:
                 r = d.ctrl_transfer(*args, timeout=2000)
-                return (bytes(r) if not isinstance(r, int) else r), None
+                r = bytes(r) if not isinstance(r, int) else r
+                log('   ctrl %s -> %s' % (que, r if isinstance(r, int) else '%d bytes: %s' % (len(r), hx(r))))
+                return r, None
             except (usb.core.USBError, NotImplementedError, ValueError) as e:
+                log('   ctrl %s -> error %r (libusb %s, errno %s)' % (que, e, getattr(e, 'backend_error_code', '-'),
+                                                                     getattr(e, 'errno', '-')))
                 err = e
         return None, err
 
     estado = 'bien'
     for k, d in enumerate(devs):
         nombre = 'joystick %d (%04x:%04x)' % (k + 1, d.idVendor, d.idProduct)
+        log('%s: bus %s dir %s, bcdDevice %s' % (nombre, getattr(d, 'bus', '?'), getattr(d, 'address', '?'),
+                                                 hex(getattr(d, 'bcdDevice', 0))))
         propia, e1 = pedir(d, (0xA1, 0x01, 0x03F2, 0, 17), (0xA1, 0x01, 0x03F2, 0, 18))
         llama, e2 = pedir(d, (0xA1, 0x01, 0x03F5, 0, 8))
         print('%s: direccion %s, llama a %s' % (nombre, fmt(propia[4:10]) if propia and len(propia) >= 10 else '?',
@@ -306,6 +496,10 @@ class SP_DEVICE_INTERFACE_DATA(ctypes.Structure):
     _fields_ = [('cbSize', W.DWORD), ('InterfaceClassGuid', GUID), ('Flags', W.DWORD), ('Reserved', ctypes.c_void_p)]
 
 
+class SP_DEVINFO_DATA(ctypes.Structure):
+    _fields_ = [('cbSize', W.DWORD), ('ClassGuid', GUID), ('DevInst', W.DWORD), ('Reserved', ctypes.c_void_p)]
+
+
 class HIDD_ATTRIBUTES(ctypes.Structure):
     _fields_ = [('Size', W.ULONG), ('VendorID', W.USHORT), ('ProductID', W.USHORT), ('VersionNumber', W.USHORT)]
 
@@ -323,6 +517,10 @@ setupapi.SetupDiEnumDeviceInterfaces.argtypes = [ctypes.c_void_p, ctypes.c_void_
 setupapi.SetupDiGetDeviceInterfaceDetailW.argtypes = [ctypes.c_void_p, ctypes.POINTER(SP_DEVICE_INTERFACE_DATA),
                                                       ctypes.c_void_p, W.DWORD, ctypes.POINTER(W.DWORD), ctypes.c_void_p]
 setupapi.SetupDiDestroyDeviceInfoList.argtypes = [ctypes.c_void_p]
+setupapi.SetupDiEnumDeviceInfo.argtypes = [ctypes.c_void_p, W.DWORD, ctypes.POINTER(SP_DEVINFO_DATA)]
+setupapi.SetupDiGetDeviceRegistryPropertyW.argtypes = [ctypes.c_void_p, ctypes.POINTER(SP_DEVINFO_DATA), W.DWORD,
+                                                       ctypes.POINTER(W.DWORD), ctypes.c_void_p, W.DWORD,
+                                                       ctypes.POINTER(W.DWORD)]
 kernel32.CreateFileW.restype = W.HANDLE
 kernel32.CreateFileW.argtypes = [W.LPCWSTR, W.DWORD, W.DWORD, ctypes.c_void_p, W.DWORD, W.DWORD, W.HANDLE]
 kernel32.CloseHandle.argtypes = [W.HANDLE]
@@ -332,6 +530,54 @@ hid.HidD_FreePreparsedData.argtypes = [ctypes.c_void_p]
 hid.HidP_GetCaps.argtypes = [ctypes.c_void_p, ctypes.POINTER(HIDP_CAPS)]
 hid.HidD_GetFeature.argtypes = [W.HANDLE, ctypes.c_void_p, W.ULONG]
 hid.HidD_SetFeature.argtypes = [W.HANDLE, ctypes.c_void_p, W.ULONG]
+
+
+def windows_drivers():
+    """al log: cada cosa USB enchufada con su driver (WinUSB, HidUsb, xusb22...), para ver si Zadig le puso
+    WinUSB al joystick y no a otra cosa"""
+    info = setupapi.SetupDiGetClassDevsW(None, 'USB', None, 0x06)  # PRESENT | ALLCLASSES
+    if not info or info == ctypes.c_void_p(-1).value:
+        log('setupapi: no lista los USB (error %d)' % ctypes.get_last_error())
+        return
+
+    def prop(data, p):
+        buf = ctypes.create_unicode_buffer(512)
+        if not setupapi.SetupDiGetDeviceRegistryPropertyW(info, ctypes.byref(data), p, None, buf,
+                                                          ctypes.sizeof(buf), None):
+            return ''
+        return buf.value
+
+    for i in range(300):
+        data = SP_DEVINFO_DATA()
+        data.cbSize = ctypes.sizeof(data)
+        if not setupapi.SetupDiEnumDeviceInfo(info, i, ctypes.byref(data)):
+            break
+        hwid = prop(data, 1)                          # SPDRP_HARDWAREID: USB\VID_054C&PID_0268&REV_0100
+        if not hwid:
+            continue
+        log('usb %s | %s | driver %s' % (hwid, prop(data, 0x0C) or prop(data, 0), prop(data, 4) or 'ninguno'))
+    setupapi.SetupDiDestroyDeviceInfoList(info)
+
+
+def windows_diagnostico():
+    try:
+        from importlib.metadata import version
+    except ImportError:
+        version = None
+    for paquete in ('pyusb', 'libusb-package'):
+        try:
+            log('%s %s' % (paquete, version(paquete)))
+        except Exception as e:
+            log('%s: no esta instalado (%s)' % (paquete, e.__class__.__name__))
+    try:
+        import libusb_package
+        for d in libusb_package.find(find_all=True):
+            log('libusb ve %04x:%04x clase %02x' % (d.idVendor, d.idProduct, getattr(d, 'bDeviceClass', 0)))
+    except ImportError:
+        pass
+    except Exception as e:
+        log('libusb no anda: %r' % e)
+    seguro(windows_drivers)
 
 
 def joysticks():
@@ -361,6 +607,7 @@ def joysticks():
         attr.Size = ctypes.sizeof(attr)
         hid.HidD_GetAttributes(h, ctypes.byref(attr))
         if (attr.VendorID, attr.ProductID) not in PADS:
+            log('HID %04x:%04x' % (attr.VendorID, attr.ProductID))
             kernel32.CloseHandle(h)
             continue
         pre = ctypes.c_void_p()
@@ -368,6 +615,8 @@ def joysticks():
         hid.HidD_GetPreparsedData(h, ctypes.byref(pre))
         hid.HidP_GetCaps(pre, ctypes.byref(caps))
         hid.HidD_FreePreparsedData(pre)
+        log('HID %04x:%04x de PS3: entrada %d, salida %d, feature %d bytes' % (attr.VendorID, attr.ProductID,
+            caps.InputReportByteLength, caps.OutputReportByteLength, caps.FeatureReportByteLength))
         out.append((h, max(caps.FeatureReportByteLength, 64), attr.VendorID, attr.ProductID))
     setupapi.SetupDiDestroyDeviceInfoList(info)
     return out
@@ -377,7 +626,9 @@ def get_feature(h, n, rid):
     b = (ctypes.c_ubyte * n)()
     b[0] = rid
     if not hid.HidD_GetFeature(h, b, n):
+        log('   HidD_GetFeature %02X (%d) -> error %d' % (rid, n, ctypes.get_last_error()))
         return None
+    log('   HidD_GetFeature %02X (%d) -> %s' % (rid, n, hx(bytes(b))))
     return bytes(b)
 
 
@@ -400,6 +651,7 @@ def hid_grabar(pads, nueva):
                 b[2 + j] = nueva[j]
             ok = hid.HidD_SetFeature(h, b, n)
             err = ctypes.get_last_error() if not ok else 0
+            log('   HidD_SetFeature %s -> %s (error %d)' % (hx(bytes(b)[:8]), ok, err))
             llama = get_feature(h, n, 0xF5)
             print('   grabado %s -> ahora llama a %s%s' % ('bien' if ok else 'MAL', fmt(llama[2:8]) if llama else '?',
                   '  (error %d)' % err if err else ''))
@@ -412,6 +664,7 @@ def hid_grabar(pads, nueva):
 
 def main():
     nueva = leer_direccion()
+    seguro(windows_diagnostico)
     usbs = libusb_pads()
     estado = libusb_grabar(usbs, nueva) if usbs else None
     if estado == 'bien':
@@ -442,4 +695,4 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(correr(main))

@@ -89,10 +89,27 @@ estaba: *Administrador de dispositivos*, el joystick (ahora en *Dispositivos de 
 
 Los genéricos que Windows ve como un mando de Xbox 360 no aceptan la dirección ni así: probar en Linux.
 
+## Si no anda: el archivo `ds3pair.log`
+
+Cada vez que corre, `ds3pair.py` deja `ds3pair.log` en su carpeta (al final dice dónde). Tiene el detalle de lo que
+pasó:
+
+- cada pedido al joystick, con los bytes que contestó o el error;
+- todo lo enchufado por USB, con el driver de cada cosa. En Windows se ve si Zadig le puso WinUSB al joystick o a otra
+  cosa; en Linux, si lo tomó `xpad`;
+- las versiones de Windows o Linux, de Python, de pyusb y de `ds3pair.py`;
+- en Linux, lo último que dijo el kernel del USB;
+- si el programa se cortó, dónde se cortó.
+
+Mandarlo a quien te esté ayudando, o adjuntarlo en un
+[issue](https://github.com/Dante-Leoncini/bthid-s60/issues). Tiene la dirección del teléfono y la del joystick.
+
 ## 3. Conectarlo
 
 Desenchufar el USB y apretar PS: el joystick llama al teléfono. El driver (desde la versión 0.2) lo atiende,
 le prende la luz de su número (1 a 4) y la app tiene la prueba en *Pruebas > Joysticks*.
+
+Si el teléfono pide un código para conectarlo, casi siempre es `0000` (cuatro ceros). Probar con ese.
 
 ## El protocolo (lo que hace el driver)
 
