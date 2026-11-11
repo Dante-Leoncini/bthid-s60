@@ -16,7 +16,11 @@ enum TBtHidDeviceState  { EBtHidDisconnected = 0, EBtHidConnecting = 1, EBtHidCo
 // lo que se le puede pedir a un dispositivo (RBtHidManager::DeviceCommand)
 enum TBtHidDeviceCommand { EBtHidCmdDisconnect = 1, EBtHidCmdConnect = 2, EBtHidCmdRemove = 3,
                            // un joystick al lugar N (1-4): EBtHidCmdMoveToPad + N (si estaba ocupado, se intercambian)
-                           EBtHidCmdMoveToPad = 0x10 };
+                           EBtHidCmdMoveToPad = 0x10,
+                           // Wiimote: las flechas giradas (para usarlo acostado) o normales; se guarda con el.
+                           // EBtHidCmdWiiArrows devuelve 1 si estan giradas
+                           EBtHidCmdWiiArrows = 0x20, EBtHidCmdWiiArrowsNormal = 0x21,
+                           EBtHidCmdWiiArrowsSideways = 0x22 };
 
 struct TBtHidDeviceInfo
 {

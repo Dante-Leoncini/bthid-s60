@@ -73,7 +73,7 @@ enum TTextId
 	ETxtSlotCalling, ETxtBattery, ETxtCharging, ETxtSlotHelp, ETxtSlotOptions, ETxtSlotMove, ETxtBatteryNone,
 	ETxtSlotCallingWii, ETxtWiiHelp, ETxtWiiPage1, ETxtWiiPage2, ETxtWiiNoGyro, ETxtWiiGyro, ETxtWiiLeds,
 	ETxtWiiNoAim, ETxtWiiAim, ETxtWiiShots, ETxtWiiCamera, ETxtWiiScreen, ETxtSlotAddWii, ETxtWiiSearching, ETxtWiiNotFound,
-	ETxtWiiFound,
+	ETxtWiiFound, ETxtWiiArrowsSideways, ETxtWiiArrowsNormal,
 	ETxtCount
 };
 
@@ -178,6 +178,8 @@ static const TText *const KTextEn[ETxtCount] =
 	_S( "Looking for a Wiimote: press 1+2" ),
 	_S( "No Wiimote found (press 1+2 and try again)" ),
 	_S( "Wiimote found: connecting" ),
+	_S( "Rotate arrows (held sideways)" ),
+	_S( "Normal arrows (held upright)" ),
 };
 
 static const TText *const KTextEs[ETxtCount] =
@@ -281,6 +283,8 @@ static const TText *const KTextEs[ETxtCount] =
 	_S( "Buscando un Wiimote: apret\x00e1 1+2" ),
 	_S( "No apareci\x00f3 el Wiimote (apret\x00e1 1+2 y prob\x00e1 de nuevo)" ),
 	_S( "Wiimote encontrado: conectando" ),
+	_S( "Girar las flechas (acostado)" ),
+	_S( "Flechas normales (parado)" ),
 };
 
 static TBool gSpanish;
@@ -1514,9 +1518,9 @@ public:
 	/* el centro sobre un lugar: lo que se puede hacer con el (agregar uno, conectar, desconectar, quitar) */
 	void SlotSelectedL( TInt aSlot )
 	{
-		enum { EActAdd, EActConnect, EActDisconnect, EActRemove, EActAddWii, EActMove1 };
+		enum { EActAdd, EActConnect, EActDisconnect, EActRemove, EActAddWii, EActWiiArrows, EActMove1 };
 		CDesCArrayFlat *items;
-		TInt acts[4 + EBtHidMaxPads], n = 0, sel, k;
+		TInt acts[5 + EBtHidMaxPads], n = 0, sel, k, sideways = 0;
 		if( iConnectErr != KErrNone || aSlot < 0 || aSlot >= ESlots )
 			return;
 		items = new( ELeave ) CDesCArrayFlat( 4 );
@@ -1544,6 +1548,13 @@ public:
 			{
 				items->AppendL( Txt( ETxtSlotDisconnect ));
 				acts[n++] = EActDisconnect;
+			}
+			// un Wiimote: las flechas giradas para usarlo acostado (no cambian al girar el control)
+			if( iSlotWii[aSlot] )
+			{
+				sideways = iMgr.DeviceCommand( iSlotAddr[aSlot], EBtHidCmdWiiArrows ) == 1;
+				items->AppendL( Txt( sideways ? ETxtWiiArrowsNormal : ETxtWiiArrowsSideways ));
+				acts[n++] = EActWiiArrows;
 			}
 			// un joystick: pasarlo a otro numero (si estaba ocupado, se intercambian)
 			for( k = 0; k < EBtHidMaxPads && aSlot >= ESlotPad1; k++ )
@@ -1584,6 +1595,9 @@ public:
 			break;
 		case EActRemove:
 			iMgr.DeviceCommand( addr, EBtHidCmdRemove );
+			break;
+		case EActWiiArrows:
+			iMgr.DeviceCommand( addr, sideways ? EBtHidCmdWiiArrowsNormal : EBtHidCmdWiiArrowsSideways );
 			break;
 		default:
 			if( acts[sel] >= EActMove1 )
@@ -2131,6 +2145,7 @@ private:
 	TBool          iSlotUsed[ESlots];
 	TInt           iSlotState[ESlots];
 	TBuf8<6>       iSlotAddr[ESlots];
+	TBool          iSlotWii[ESlots];   // es un Wiimote (tiene la opcion de girar las flechas)
 	CMgrView      *iView;
 	CDesCArray    *iLines;
 	CSearch       *iSearch;
@@ -2213,6 +2228,7 @@ void CMgrAppUi::Refresh()
 		iSlotUsed[slot] = d != NULL;
 		iSlotState[slot] = d ? d->iState : EBtHidDisconnected;
 		iSlotAddr[slot].Zero();
+		iSlotWii[slot] = d && slot >= ESlotPad1 && d->iName.Find( _L8( "RVL-CNT" )) >= 0;
 		if( !d )
 		{
 			TPtrC none = Txt( ETxtSlotEmpty );

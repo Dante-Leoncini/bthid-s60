@@ -3,6 +3,13 @@
 Lo nuevo en cada versión del driver Bluetooth HID para S60 3rd. La versión se ve en la app **Bluetooth HID**, en
 Opciones > Acerca de.
 
+## 0.12 — 2026-11-11
+
+- **Wiimote**: girar el control ya no cambia la dirección de las flechas (antes, acostado, el acelerómetro las
+  giraba solo en el modo teclado). En la pantalla principal, en las opciones del lugar del Wiimote: *Girar las
+  flechas (acostado)* / *Flechas normales (parado)*. Se guarda con el Wiimote y vale para los juegos que leen el
+  joystick (como el emulador de Mega Drive) y para el modo teclado.
+
 ## 0.11 — 2026-11-11
 
 - **Pantallas táctiles** (N8, 5800, ...): en la pantalla principal, tocar un lugar (Mouse, Teclado, Joystick 1 a 4)

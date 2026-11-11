@@ -41,7 +41,8 @@ enum // iFlags del dispositivo (se guardan con el)
 {
 	EFlagSdpKnown    = 1,  // ya leimos estos atributos
 	EFlagReconnSelf  = 2,  // HIDReconnectInitiate
-	EFlagNormConnect = 4   // HIDNormallyConnectable
+	EFlagNormConnect = 4,  // HIDNormallyConnectable
+	EFlagWiiSideways = 8   // Wiimote: las flechas giradas (el control acostado), lo elige la app
 };
 const TInt   KMaxHidDesc      = 512;
 const TUint8 KHidpDataInput   = 0xA1;  // HIDP DATA, reporte de entrada
@@ -175,6 +176,10 @@ public:
 	// Wiimote: por el nombre que da el cuadro de busqueda ("Nintendo RVL-CNT-01", el Plus "...-01-TR")
 	TBool IsWii() const { return iType == EBtHidGamepad && ( iPadKind == EBtHidPadWii || iName.Find( _L8( "RVL-CNT" )) >= 0 ); }
 	void WiiState( TBtHidWiiState &aState ) const;
+	// Wiimote: las flechas giradas (el control acostado: la cruceta a la izquierda, derecha es arriba); fijo, no se
+	// cambia al girar el control
+	TBool WiiSideways() const { return ( iFlags & EFlagWiiSideways ) != 0; }
+	void SetWiiSideways( TBool aOn ) { iFlags = aOn ? iFlags | EFlagWiiSideways : iFlags & ~EFlagWiiSideways; }
 
 private:
 	enum TState { EIdle, EConnCtrl, EConnIntr, ESetProto, EReading, EWaitRetry, EWaitIntr, EWaitDevice };
@@ -277,7 +282,6 @@ private:
 	TReal       iWiiShotX, iWiiShotY;
 	TInt        iWiiShotAim;
 	TInt        iWiiLogged;      // para el log: respuestas de escritura con error
-	TBool       iWiiSideways;    // acostado (modo teclado: la cruceta girada)
 public:
 	void PadKeys();              // el modo teclado: las teclas de lo apretado ahora
 	void ReleasePadKeys();
@@ -585,14 +589,17 @@ void CBtHidDevice::WiiReport( const TDesC8 &aData )
 	}
 	iWiiButtons = b;
 
-	/* como joystick (PadState y el modo teclado): A cruz, B R2, 1 cuadrado, 2 circulo, - select, + start, Home PS */
+	/* como joystick (PadState y el modo teclado): A cruz, B R2, 1 cuadrado, 2 circulo, - select, + start, Home PS. Con
+	   las flechas giradas (la opcion de la app): arriba es izquierda, abajo derecha, izquierda abajo, derecha arriba */
 	{
 		static const TUint8 padOf[EBtHidWiiButtons] = { EBtHidPadUp, EBtHidPadDown, EBtHidPadLeft, EBtHidPadRight,
 			EBtHidPadCross, EBtHidPadR2, EBtHidPadSquare, EBtHidPadCircle, EBtHidPadSelect, EBtHidPadStart, EBtHidPadPS };
+		static const TUint8 sidewaysOf[4] = { EBtHidPadLeft, EBtHidPadRight, EBtHidPadDown, EBtHidPadUp };
+		const TBool sideways = WiiSideways();
 		TUint32 pb = 0;
 		for( i = 0; i < EBtHidWiiButtons; i++ )
 			if( b & ( 1 << i ))
-				pb |= 1 << padOf[i];
+				pb |= 1 << ( i < 4 && sideways ? sidewaysOf[i] : padOf[i] );
 		iPadButtons = pb;
 		for( i = 0; i < EBtHidPadButtons; i++ )
 			iPadPressure[i] = ( pb & ( 1 << i )) ? 255 : 0;
@@ -1317,7 +1324,7 @@ void CBtHidDevice::DescriptorDone( TInt aError, const TDesC8 &aDesc, TInt aFlags
 		Log( "sin descriptor HID, queda el protocolo boot", aError );
 		return;
 	}
-	iFlags = aFlags;
+	iFlags = ( aFlags & ~EFlagWiiSideways ) | ( iFlags & EFlagWiiSideways ); // (el giro lo elige la app, no el SDP)
 	msg.Format( _L8( "SDP: se reconecta solo %d, contesta si lo llaman %d" ),
 		( iFlags & EFlagReconnSelf ) != 0, ( iFlags & EFlagNormConnect ) != 0 );
 	iHost.Observer().BtHidLog( (const char *)msg.PtrZ());
@@ -1755,18 +1762,16 @@ void CBtHidDevice::PadKeys()
 	}
 	if( IsWii())
 	{
-		/* el Wiimote, sus teclas: Home menu, - y + las de abajo de la pantalla, A ok, B 1 2 los numeros 1 2 3. Acostado
-		   (de costado, inclinado hacia uno: el acelerometro lo ve en X), la cruceta girada: derecha es arriba */
+		/* el Wiimote, sus teclas: Home menu, - y + las de abajo de la pantalla, A ok, B 1 2 los numeros 1 2 3. Con las
+		   flechas giradas (la opcion de la app, para usarlo acostado): derecha es arriba. No depende de como se lo
+		   tenga: girar el control no cambia las flechas */
 		static const TUint8 keys[EBtHidWiiButtons] = { 82, 81, 80, 79, EBtHidPhoneOk, 30, 31, 32,
 			EBtHidPhoneSoftLeft, EBtHidPhoneSoftRight, EBtHidPhoneMenu };
 		static const TUint8 sideways[4] = { 80, 79, 81, 82 }; // arriba abajo izquierda derecha -> izq der abajo arriba
-		TInt one = iWiiOne[0] - iWiiZero[0], gx = one > 0 ? ( iWiiAccel[0] - iWiiZero[0] ) * 100 / one : 0;
-		if( gx < 0 ) gx = -gx;
-		if( gx > 50 ) iWiiSideways = ETrue;
-		else if( gx < 25 ) iWiiSideways = EFalse;
+		const TBool rotated = WiiSideways();
 		for( i = 0; i < EBtHidWiiButtons; i++ )
 		{
-			TInt k = ( iWiiButtons & ( 1u << i )) ? ( i < 4 && iWiiSideways ? sideways[i] : keys[i] ) : 0;
+			TInt k = ( iWiiButtons & ( 1u << i )) ? ( i < 4 && rotated ? sideways[i] : keys[i] ) : 0;
 			if( !k ) continue;
 			for( j = 0; j < n && want[j] != k; j++ ) {}
 			if( j == n ) want[n++] = (TUint8)k;
@@ -2772,6 +2777,13 @@ TInt CBtHidHost::DeviceCommand( const TBTDevAddr &aAddr, TInt aCommand )
 			iDev[i]->Stop();
 		else if( aCommand == EBtHidCmdConnect )
 			iDev[i]->Resume();
+		else if( aCommand == EBtHidCmdWiiArrows )
+			return iDev[i]->WiiSideways() ? 1 : 0;
+		else if( aCommand == EBtHidCmdWiiArrowsNormal || aCommand == EBtHidCmdWiiArrowsSideways )
+		{
+			iDev[i]->SetWiiSideways( aCommand == EBtHidCmdWiiArrowsSideways );
+			Save();
+		}
 		else if( aCommand > EBtHidCmdMoveToPad && aCommand <= EBtHidCmdMoveToPad + EBtHidMaxPads
 			&& iDev[i]->Type() == EBtHidGamepad )
 		{
