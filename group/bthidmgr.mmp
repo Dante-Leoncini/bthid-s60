@@ -36,5 +36,6 @@ LIBRARY         eikcoctl.lib
 LIBRARY         eikctl.lib  // la lista de perfiles
 LIBRARY         eikdlg.lib
 LIBRARY         efsrv.lib   // los archivos de los perfiles
+LIBRARY         hal.lib     // HALData::EPen: si la pantalla es tactil
 LIBRARY         bthidhost.lib
 LIBRARY         apgrfx.lib  // abrir leoncini.com.ar en el navegador

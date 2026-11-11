@@ -3,6 +3,14 @@
 Lo nuevo en cada versión del driver Bluetooth HID para S60 3rd. La versión se ve en la app **Bluetooth HID**, en
 Opciones > Acerca de.
 
+## 0.11 — 2026-11-11
+
+- **Pantallas táctiles** (N8, 5800, ...): en la pantalla principal, tocar un lugar (Mouse, Teclado, Joystick 1 a 4)
+  lo elige y abre sus opciones, como el centro de la cruceta; arrastrar desplaza la lista cuando no entra. En las
+  pantallas táctiles cada lugar es más alto, para no errarle con el dedo.
+- En *Probar joysticks*, con el dedo: tocar a la izquierda o a la derecha cambia de joystick; en el medio prende o
+  apaga la vibración (con un Wiimote, cambia entre sus dos pruebas).
+
 ## 0.10 — 2026-11-03
 
 - **Wiimote** (y Wii Remote Plus): se agrega en un lugar de joystick apretando 1+2. Botones, acelerometro,

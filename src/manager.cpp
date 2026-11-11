@@ -36,6 +36,7 @@ Textos en ingles o en castellano segun el idioma del telefono.
 #include "cursor.h"
 #include "version.h"
 #include <apgcli.h>
+#include <hal.h>     // HALData::EPen: si la pantalla es tactil (N8, 5800...)
 #include <aknmessagequerydialog.h>
 #include <e32property.h>
 #include <bt_subscribe.h>
@@ -351,6 +352,10 @@ enum TMgrMode { EModeStatus, EModeMouse, EModeKeys, EModePads };
 
 /* los lugares de la pantalla principal: el mouse, el teclado y los joysticks 1-4 */
 enum { ESlotMouse = 0, ESlotKeyboard, ESlotPad1, ESlots = ESlotPad1 + EBtHidMaxPads };
+/* el dedo (pantallas tactiles): el alto minimo de cada lugar y cuanto hay que mover el dedo para que sea arrastrar
+   y no tocar */
+static const TInt KAltoDedo = 56;
+static const TInt KUmbralArrastre = 12;
 
 class MSlotObserver
 {
@@ -372,6 +377,12 @@ public:
 	void ConstructL( const TRect &aRect )
 	{
 		CreateWindowL();
+		/* pantalla tactil: los lugares mas altos (para el dedo) y arrastrar desplaza la lista */
+		TInt pen = 0;
+		if( HAL::Get( HALData::EPen, pen ) == KErrNone && pen )
+			iTactil = ETrue;
+		EnableDragEvents();
+		iOffToque = -1;
 		SetRect( aRect );
 		iKeyLines = new( ELeave ) CDesCArrayFlat( 8 );
 		TRAP_IGNORE( LoadCursorL());
@@ -429,6 +440,7 @@ public:
 		{
 			if( aKey.iCode == EKeyUpArrow || aKey.iCode == EKeyDownArrow )
 			{
+				iOffToque = -1; // (con las teclas, la lista sigue al elegido)
 				iSel = ( iSel + ( aKey.iCode == EKeyDownArrow ? 1 : ESlots - 1 )) % ESlots;
 				DrawDeferred();
 				return EKeyWasConsumed;
@@ -467,6 +479,58 @@ public:
 		return EKeyWasNotConsumed;
 	}
 	void SetEventError( TInt aErr ) { iEventErr = aErr; }
+
+	/* EL DEDO. Pantalla principal: tocar un lugar lo elige y abre sus opciones (como el centro de la cruceta);
+	   arrastrar desplaza la lista si no entra. Prueba de joysticks: tocar a la izquierda o a la derecha cambia de
+	   joystick, en el medio prende o apaga la vibracion (con un Wiimote, cambia de prueba) */
+	void HandlePointerEventL( const TPointerEvent &aEv )
+	{
+		const TPoint p = aEv.iPosition;
+		if( iMode == EModeStatus && iSlots )
+		{
+			if( aEv.iType == TPointerEvent::EButton1Down )
+			{
+				iToqueIni = p;
+				iOffIni = iOffDibujado;
+				iArrastre = EFalse;
+			}
+			else if( aEv.iType == TPointerEvent::EDrag )
+			{
+				const TInt dy = p.iY - iToqueIni.iY;
+				if( dy > KUmbralArrastre || dy < -KUmbralArrastre )
+					iArrastre = ETrue;
+				if( iArrastre )
+				{
+					iOffToque = iOffIni - dy;
+					DrawDeferred();
+				}
+			}
+			else if( aEv.iType == TPointerEvent::EButton1Up && !iArrastre )
+			{
+				const TInt slot = SlotEn( p );
+				if( slot >= 0 )
+				{
+					iSel = slot;
+					DrawNow();
+					if( iObs )
+						iObs->SlotSelectedL( slot );
+				}
+			}
+			return;
+		}
+		if( iMode == EModePads && aEv.iType == TPointerEvent::EButton1Up )
+		{
+			const TInt w = Rect().Width();
+			TKeyEvent k;
+			k.iModifiers = 0;
+			k.iRepeats = 0;
+			k.iScanCode = 0;
+			if( p.iX < w / 3 ) k.iCode = EKeyLeftArrow;
+			else if( p.iX > 2 * w / 3 ) k.iCode = EKeyRightArrow;
+			else k.iCode = iPadSt().iKind == EBtHidPadWii ? EKeyDownArrow : EKeyOK;
+			OfferKeyEventL( k, EEventKey );
+		}
+	}
 
 	void SetMode( TMgrMode aMode )
 	{
@@ -643,12 +707,20 @@ private:
 		if( iSlots )
 		{
 			/* si no entra todo, se corre para que se vea el lugar elegido (y lo de abajo, en el ultimo) */
-			TInt head = ( iLines ? iLines->Count() : 0 ) * lh, slot = 2 * lh + 3;
+			TInt head = ( iLines ? iLines->Count() : 0 ) * lh, slot = SlotAlto( lh );
 			TInt total = head + ESlots * slot + 2 + ( iFoot ? iFoot->Count() : 0 ) * lh + 4;
 			TInt h = Rect().Height(), off = 0;
 			TInt bottom = head + ( iSel + 1 ) * slot + 4;
 			if( bottom > h ) off = bottom - h;
 			if( iSel == ESlots - 1 && total > h ) off = total - h;
+			/* arrastrado con el dedo: donde lo dejo, sin pasarse de los bordes */
+			if( iOffToque >= 0 || iArrastre )
+			{
+				off = iOffToque;
+				if( off > total - h ) off = total - h;
+				if( off < 0 ) off = 0;
+			}
+			iOffDibujado = off;
 			y -= off;
 		}
 		y = DrawLines( gc, font, iLines, y );
@@ -656,7 +728,9 @@ private:
 			return;
 		for( i = 0; i < ESlots && 2 * i + 1 < iSlots->Count(); i++ )
 		{
-			TRect r( TPoint( 1, y - font->AscentInPixels() - 2 ), TSize( Rect().Width() - 2, 2 * lh + 2 ));
+			const TInt slotH = SlotAlto( lh ), pad = ( slotH - ( 2 * lh + 3 )) / 2;
+			TRect r( TPoint( 1, y - font->AscentInPixels() - 2 ), TSize( Rect().Width() - 2, slotH - 1 ));
+			y += pad;
 			if( i == iSel )
 			{
 				gc.SetBrushStyle( CGraphicsContext::ESolidBrush );
@@ -688,10 +762,33 @@ private:
 					gc.DrawText( st, TPoint( 4, y + lh ));
 				}
 			}
-			y += 2 * lh + 3;
+			y += slotH - pad;
 		}
 		gc.SetPenColor( KRgbBlack );
 		DrawLines( gc, font, iFoot, y + 2 );
+	}
+
+	/* el alto de un lugar: dos renglones; en una pantalla tactil, al menos lo que mide un dedo */
+	TInt SlotAlto( TInt aLh ) const
+	{
+		const TInt h = 2 * aLh + 3;
+		return iTactil && h < KAltoDedo ? KAltoDedo : h;
+	}
+
+	/* el lugar que esta en ese punto de la pantalla principal (-1 = ninguno): la misma cuenta que DrawStatus */
+	TInt SlotEn( const TPoint &aP ) const
+	{
+		const CFont *font = CEikonEnv::Static()->DenseFont();
+		const TInt lh = font->HeightInPixels() + 1, slot = SlotAlto( lh );
+		TInt y = font->AscentInPixels() + 3 - iOffDibujado + ( iLines ? iLines->Count() : 0 ) * lh;
+		for( TInt i = 0; i < ESlots && 2 * i + 1 < iSlots->Count(); i++ )
+		{
+			const TInt top = y - font->AscentInPixels() - 2;
+			if( aP.iY >= top && aP.iY < top + slot )
+				return i;
+			y += slot;
+		}
+		return -1;
 	}
 
 	TInt DrawLines( CWindowGc &gc, const CFont *font, const CDesCArray *aLines, TInt y ) const
@@ -1156,6 +1253,13 @@ private:
 	const CDesCArray *iFoot;
 	MSlotObserver    *iObs;
 	TInt              iSel;
+	/* el dedo */
+	TBool             iTactil;       // la pantalla es tactil (HAL EPen)
+	mutable TInt      iOffDibujado;  // lo que se corrio la lista en el ultimo dibujo
+	TInt              iOffToque;     // lo que la corrio el dedo (-1 = la lista sigue al elegido)
+	TPoint            iToqueIni;
+	TInt              iOffIni;
+	TBool             iArrastre;
 	TInt              iEventErr;
 	TInt              iEvents;
 	CFbsBitmap       *iCursor;

@@ -1,2 +1,6 @@
 # lo que deja tools/ds3pair.py al correr (tiene direcciones Bluetooth)
 ds3pair.log
+
+# lo que se arma al compilar
+build/
+group/ABLD.BAT

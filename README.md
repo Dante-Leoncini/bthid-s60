@@ -9,10 +9,16 @@ directo al dispositivo, lee los reportes tal cual vienen y manda apretado al apr
 
 ## Instalar
 
-Instalar `sis/bthid_0.10.sisx` en el telefono (en la memoria del telefono, C:) y reiniciarlo. La app **Bluetooth
+Instalar `sis/bthid_0.11.sisx` en el telefono (en la memoria del telefono, C:) y reiniciarlo. La app **Bluetooth
 HID** muestra en su pantalla principal los lugares Mouse, Teclado y Joystick 1 a 4: arriba y abajo eligen uno y el
-centro abre sus opciones (agregar, conectar, desconectar, pasar a otro numero, quitar). Lo nuevo de cada version esta
-en [CHANGELOG.md](CHANGELOG.md).
+centro abre sus opciones (agregar, conectar, desconectar, pasar a otro numero, quitar). En las pantallas tactiles
+(N8, 5800, ...) se toca el lugar y se arrastra la lista con el dedo. Lo nuevo de cada version esta en
+[CHANGELOG.md](CHANGELOG.md).
+
+El paquete esta firmado con un certificado propio y el servidor pide capacidades de sistema (SwEvent,
+WriteDeviceData...): el telefono tiene que aceptarlo. En Symbian^3 / Anna / Belle (N8) hace falta el parche
+*Install Server* de ROMPatcher+ activo al instalar. Si ya hay una version anterior firmada distinto y el telefono
+dice "no es una actualizacion valida", desinstalar la vieja primero.
 
 **Si el telefono pide un codigo** al conectar un mouse, un teclado o un joystick: casi siempre es `0000` (cuatro
 ceros). Probar con ese.
