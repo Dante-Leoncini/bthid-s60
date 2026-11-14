@@ -25,6 +25,11 @@ struct THidLayout
 	THidField iButton[3];      // izquierdo, derecho, medio
 	THidField iX, iY, iWheel;
 	THidField iMods;           // los 8 modificadores (0xE0..0xE7) seguidos
+	// LOS JOYSTICKS GENERICOS (los que no son DualShock: los de Android): el stick derecho (Z, Rz), la cruceta (el
+	// hat: 0..7 desde arriba en el sentido del reloj; otro valor = suelta) y los botones desde el 1, seguidos
+	THidField iZ, iRz, iHat;
+	THidField iPadBtn;         // el boton 1 (los siguientes, iPadBtnCount en total, van a continuacion)
+	TInt      iPadBtnCount;
 	THidField iKeys;           // arreglo de teclas: iBits por tecla, iKeyCount teclas
 	TInt      iKeyCount;
 	TUint16   iReportBits[256]; // tamano de cada reporte de entrada, por numero

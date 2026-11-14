@@ -9,7 +9,7 @@ directo al dispositivo, lee los reportes tal cual vienen y manda apretado al apr
 
 ## Instalar
 
-Instalar `sis/bthid_0.12.sisx` en el telefono (en la memoria del telefono, C:) y reiniciarlo. La app **Bluetooth
+Instalar `sis/bthid_0.13.sisx` en el telefono (en la memoria del telefono, C:) y reiniciarlo. La app **Bluetooth
 HID** muestra en su pantalla principal los lugares Mouse, Teclado y Joystick 1 a 4: arriba y abajo eligen uno y el
 centro abre sus opciones (agregar, conectar, desconectar, pasar a otro numero, quitar). En las pantallas tactiles
 (N8, 5800, ...) se toca el lugar y se arrastra la lista con el dedo. Lo nuevo de cada version esta en

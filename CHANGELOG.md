@@ -3,6 +3,15 @@
 Lo nuevo en cada versión del driver Bluetooth HID para S60 3rd. La versión se ve en la app **Bluetooth HID**, en
 Opciones > Acerca de.
 
+## 0.13 — 2026-11-14
+
+- **Joysticks genéricos** (los Bluetooth "de Android", que no son DualShock): antes se tomaban como un DualShock 4 y
+  no llegaba ningún botón (en el emulador se veían conectados pero no respondían; con dos de esos más dos DualShock,
+  en Mega Bomberman andaban solo 2 de los 4). Ahora se leen con su propio descriptor HID: los dos sticks, la cruceta
+  y los botones en el orden de Android (1 A = cruz, 2 B = círculo, 4 X = cuadrado, 5 Y = triángulo, L1 R1 L2 R2,
+  Select, Start, Home = PS, L3 R3). No se les manda la luz ni la vibración de PlayStation (no las entienden: la luz
+  que muestran es la suya).
+
 ## 0.12 — 2026-11-11
 
 - **Wiimote**: girar el control ya no cambia la dirección de las flechas (antes, acostado, el acelerómetro las

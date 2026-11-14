@@ -1667,6 +1667,43 @@ void CBtHidDevice::PadReport( const TDesC8 &aData )
 		for( i = 0; i < 12; i++ )
 			iPadPressure[press[i]] = p[15 + i];
 	}
+	else if( iLayout.iUsesIds && iLayout.iHat.iBits && iLayout.iPadBtn.iBits && n >= 3 && p[1] != 0x01 && p[1] != 0x11
+		&& p[1] == iLayout.iPadBtn.iReportId )
+	{
+		/* UN JOYSTICK GENERICO (los Bluetooth de Android: no son DualShock): se lee con su descriptor HID. Los ejes X Y
+		   (el stick izquierdo) y Z Rz (el derecho), la cruceta (el hat) y los botones en el orden de Android: 1 A (la
+		   cruz), 2 B (el circulo), 4 X (el cuadrado), 5 Y (el triangulo), 7 / 8 L1 / R1, 9 / 10 L2 / R2, 11 Select,
+		   12 Start, 13 Home (PS), 14 / 15 L3 / R3. (Si alguno no coincide, el juego deja cambiarlo) */
+		static const TInt8 btn[16] = { EBtHidPadCross, EBtHidPadCircle, -1, EBtHidPadSquare, EBtHidPadTriangle, -1,
+			EBtHidPadL1, EBtHidPadR1, EBtHidPadL2, EBtHidPadR2, EBtHidPadSelect, EBtHidPadStart, EBtHidPadPS,
+			EBtHidPadL3, EBtHidPadR3, -1 };
+		const TPtrC8 datos = aData.Mid( 2 );
+		const THidField *ejes[4] = { &iLayout.iX, &iLayout.iY, &iLayout.iZ, &iLayout.iRz };
+		if( iPadKind != EBtHidPadUnknown )
+			Log( "joystick generico: se lee con su descriptor", p[1] );
+		iPadKind = EBtHidPadUnknown;
+		for( i = 0; i < 4; i++ )
+		{
+			const THidField &f = *ejes[i];
+			TInt v = 0x80;
+			if( f.iBits && f.iReportId == p[1] )
+			{
+				v = HidField( datos, f );
+				if( f.iBits > 8 ) v >>= f.iBits - 8;      // (a 8 bits)
+				else if( f.iBits < 8 ) v <<= 8 - f.iBits;
+				if( f.iSigned ) v += 0x80;                // (los que van de -128 a 127)
+				if( v < 0 ) v = 0;
+				if( v > 255 ) v = 255;
+			}
+			iPadAxis[i] = (TUint8)v;
+		}
+		PadDpad( b, HidField( datos, iLayout.iHat ));
+		for( i = 0; i < iLayout.iPadBtnCount && i < 16; i++ )
+			if( btn[i] >= 0 && HidField( datos, iLayout.iPadBtn, i ))
+				b |= 1 << btn[i];
+		for( i = 0; i < EBtHidPadButtons; i++ )
+			iPadPressure[i] = ( b & ( 1 << i )) ? 255 : 0;
+	}
 	else
 	{
 		/* DualShock 4: el corto (A1 01, 9 bytes) o el completo (A1 11 C0 00 ...) */
@@ -1845,6 +1882,9 @@ void CBtHidDevice::PadOutput()
 		WiiSend( r, sizeof( r ));
 		return;
 	}
+	// (un joystick generico no entiende la luz ni la vibracion de PlayStation: no se le manda nada)
+	if( iPadKind == EBtHidPadUnknown )
+		return;
 	if( iPadKind == EBtHidPadPs4 )
 	{
 		TUint8  r[79];

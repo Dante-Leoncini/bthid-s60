@@ -105,12 +105,25 @@ void HidParseDescriptor( const TDesC8 &aDesc, THidLayout &aLayout )
 
 							if( page == 9 && u >= 1 && u <= 3 )
 								SetOnce( aLayout.iButton[u - 1], reportId, bit, reportSize, EFalse );
+							// (los botones de un joystick: el 1 y cuantos siguen, del 1 al 32)
+							if( page == 9 && u == 1 && reportSize == 1 )
+								SetOnce( aLayout.iPadBtn, reportId, bit, 1, EFalse );
+							if( page == 9 && u >= 1 && u <= 32 && aLayout.iPadBtn.iBits
+								&& reportId == aLayout.iPadBtn.iReportId && bit == aLayout.iPadBtn.iBit + (TInt)( u - 1 )
+								&& (TInt)u > aLayout.iPadBtnCount )
+								aLayout.iPadBtnCount = u;
 							else if( page == 1 && u == 0x30 )
 								SetOnce( aLayout.iX, reportId, bit, reportSize, sgn );
 							else if( page == 1 && u == 0x31 )
 								SetOnce( aLayout.iY, reportId, bit, reportSize, sgn );
 							else if( page == 1 && u == 0x38 )
 								SetOnce( aLayout.iWheel, reportId, bit, reportSize, sgn );
+							else if( page == 1 && u == 0x32 )
+								SetOnce( aLayout.iZ, reportId, bit, reportSize, sgn );
+							else if( page == 1 && u == 0x35 )
+								SetOnce( aLayout.iRz, reportId, bit, reportSize, sgn );
+							else if( page == 1 && u == 0x39 )
+								SetOnce( aLayout.iHat, reportId, bit, reportSize, EFalse );
 							else if( page == 7 && u == 0xE0 && reportSize == 1 )
 								SetOnce( aLayout.iMods, reportId, bit, 8, EFalse ); // E0..E7 van seguidos
 						}
